@@ -12,85 +12,374 @@ The steps it will attempt to take:
 * Create encode_webcam systemd service and enable it
 
 If running over SSH, please use in a background terminal like "tmux" or "screen" due to compile time.
+
+This will build a NON REDISTRIBUTABLE FFmpeg. Please be aware you will not be able to share the built binaries
+under any license.
+
+
 """
 import logging
 import os
 import sys
-from subprocess import run
+import shutil
+import datetime
+from subprocess import run, CalledProcessError, PIPE, STDOUT, Popen
 from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 log = logging.getLogger("streaming_setup")
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)-12s  %(levelname)-8s %(message)s")
+command_log = logging.getLogger("streaming_setup.command")
+CMD_LVL = 15
+logging.addLevelName(CMD_LVL, "CMD")
+
+logging.basicConfig(level=logging.DEBUG,
+                    format="%(asctime)s - %(name)-12s  %(levelname)-8s %(message)s",
+                    filename=f"streaming_setup_{datetime.datetime.now().strftime('%Y%M%d_%H%M%S')}.log")
 
 here = Path(__file__).parent
 disable_overwrite = False
 
+# Different levels of FFmpeg configurations
+# They are set to be in format ( configuration flag(s), apt library(s) )
+
+# Minimal h264, x264, alsa sound and fonts
+minimal_ffmpeg_config = [
+    ("--enable-libx264", "libx264-dev"),
+    ("--enable-indev=alsa --enable-outdev=alsa", "libasound2-dev"),
+    ("--enable-mmal --enable-omx --enable-omx-rpi", "libomxil-bellagio-dev"),
+    ("--enable-libfreetype", "libfreetype6-dev fonts-freefont-ttf"),
+]
+
+# Recommenced, also installs fdk-aac  (takes about 15 minutes on a Pi 4)
+standard_ffmpeg_config = minimal_ffmpeg_config + [
+    ("--enable-libx265", "libx265-dev"),
+    ("--enable-libvpx", "libvpx-dev"),
+    ("--enable-libmp3lame", "libmp3lame-dev"),
+    ("--enable-libvorbis", "libvorbis-dev"),
+    ("--enable-libopus", "libopus-dev"),
+    ("--enable-libtheora", "libtheora-dev"),
+    ("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"),
+    ("--enable-librtmp", "librtmp-dev"),
+]
+
+# Everything and the kitchen sink
+all_ffmpeg_config = standard_ffmpeg_config + [
+    ("--enable-libass", "libass-dev"),
+    ("--enable-avresample", "libavresample-dev"),
+    ("--enable-fontconfig", "libfontconfig1-dev"),
+    ("--enable-chromaprint", "libchromaprint-dev"),
+    ("--enable-frei0r", "frei0r-plugins-dev"),
+    ("--enable-libsoxr", "libsoxr-dev"),
+    ("--enable-libwebp", "libwebp-dev"),
+    ("--enable-libbluray", "libbluray-dev"),
+    ("--enable-libopencore-amrwb", "libopencore-amrwb-dev"),
+    ("--enable-libopencore-amrnb", "libopencore-amrnb-dev"),
+    ("--enable-libvo-amrwbenc", "libvo-amrwbenc-dev"),
+    ("--enable-librubberband", "librubberband-dev"),
+    ("--enable-libspeex", "libspeex-dev"),
+    ("--enable-libvidstab", "libvidstab-dev"),
+    ("--enable-libxvid", "libxvidcore-dev"),
+    ("--enable-libxml2", "libxml2-dev"),
+    ("--enable-libfribidi", "libfribidi-dev"),
+    ("--enable-libgme", "libgme-dev"),
+    ("--enable-openssl", "libssl-dev"),
+    ("--enable-gmp", "libgmp-dev"),
+    ("--enable-libbs2b", "libbs2b-dev"),
+    ("--enable-libcaca", "libcaca-dev"),
+    ("--enable-libcdio", "libcdio-dev libcdio-paranoia-dev"),
+    ("--enable-libdc1394", "libdc1394-22-dev"),
+    ("--enable-libflite", "flite1-dev"),
+    ("--enable-libfontconfig", "libfontconfig1-dev"),
+    ("--enable-libgsm", "libgsm1-dev"),
+    ("--enable-libjack", "libjack-dev libjack0"),
+    ("--enable-libmodplug", "libmodplug-dev"),
+    ("--enable-libopenmpt", "libopenmpt-dev"),
+    ("--enable-libpulse", "libpulse-dev"),
+    ("--enable-librsvg", "librsvg2-dev"),
+    ("--enable-libshine", "libshine-dev"),
+    ("--enable-libsnappy", "libsnappy-dev"),
+    ("--enable-libssh", "libssh-dev"),
+    ("--enable-libtesseract", "libtesseract-dev"),
+    ("--enable-libtwolame", "libtwolame-dev"),
+    ("--enable-libwavpack", "libwavpack-dev"),
+    ("--enable-libxcb", "libxcb1-dev"),
+    ("--enable-libxcb-shm", "libxcb-shm0-dev"),
+    ("--enable-libxcb-xfixes", "libxcb-xfixes0-dev"),
+    ("--enable-libxcb-shape", "libxcb-shape0-dev"),
+    ("--enable-libzmq", "libzmq3-dev"),
+    ("--enable-libzvbi", "libzvbi-dev"),
+    ("--enable-libdrm", "libdrm-dev"),
+    ("--enable-openal", "libopenal-dev"),
+    ("--enable-opengl", "libopengl-dev"),
+    # ('--enable-ladspa', 'libsoxr-dev'),
+    # ('--enable-libxavs', ''),
+    # ('--enable-avisynth', ''),
+    # ('--enable-gray', ''),
+    # ('--enable-libsrt', ''),
+    # ('--enable-libsmbclient', 'libsmbclient-dev'), # ERROR: libsmbclient not found
+    # ('--enable-libopencv', 'libopencv-dev libopencv-apps-dev'),  # ERROR: libopencv not found
+    # ('--enable-libiec61883', 'libiec61883-dev libiec61883-0'),  # ERROR: libiec61883 not found
+    # ('--enable-libcelt', 'libcelt-dev'), # ERROR: libcelt must be installed and version must be >= 0.11.0.
+]
+
 
 def parse_arguments():
+    # TODO auto detect video size and codec, and if need to install
+    # TODO add input fps rate
     video_devices = list(Path("/dev/").glob("video*"))
     default_video_device = str(video_devices[0]) if video_devices else "/dev/video0"
 
     parser = ArgumentParser(prog="streaming_setup", description=f"streaming_setup version {__version__}")
     parser.add_argument("-v", "--version", action="store_true")
-    parser.add_argument("-d", "-i", "--device", default=default_video_device)
-    parser.add_argument("-s", "--video-size", default="1920x1080")
-    parser.add_argument("-f", "--input-format", default="h264")
+    parser.add_argument(
+        "-d", "-i", "--device", default=default_video_device, help=f"Camera (using {default_video_device} currently)"
+    )
+    parser.add_argument(
+        "-s", "--video-size", default="1920x1080", help="The video size from the camera (NOT AUTO DETECTED)"
+    )
+    parser.add_argument(
+        "-f", "--input-format", default="h264", help="The format the camera supports (NOT AUTO DETECTED)"
+    )
+    parser.add_argument(
+        "-t",
+        "--install-type",
+        default="standard",
+        help="(min,standard,all) Which selection of ffmpeg libraries to use. Defaults to 'standard'",
+    )
+    parser.add_argument(
+        "-c", "--codec",
+        default="copy",
+        help="Conversion codec (default is 'copy')"
+    )
+    parser.add_argument(
+        "--ffmpeg-params",
+        help="specify additional ffmpeg params, helpful if not copying codec e.g.: '-b:v 4M -maxrate 4M -buffsize 8M' "
+    )
     parser.add_argument("--index-file", default="/var/www/html/index.html")
     parser.add_argument("--on-reboot-file", default="/opt/setup_streaming.sh")
     parser.add_argument("--systemd-file", default="/etc/systemd/system/encode_webcam.service")
     parser.add_argument("--disable-compile-ffmpeg", action="store_true")
     parser.add_argument("--disable-install-ffmpeg", action="store_true")
-    parser.add_argument( "--safe", action="store_true", help="disable overwrite of existing scripts.")
+    parser.add_argument("--disable-fdk-aac", action="store_true", help="Normally installed on 'standard' install")
+    parser.add_argument("--disable-dav1d", action="store_true", help="Normally installed on 'all' install")
+    parser.add_argument("--disable-zimg", action="store_true", help="Normally installed on 'all' install")
+    parser.add_argument("--disable_kvazaar", action="store_true", help="Normally installed on 'all' install")
+    # parser.add_argument("--disable_vmaf", action="store_true")
+    parser.add_argument("--safe", action="store_true", help="disable overwrite of existing scripts")
     return parser.parse_args()
 
 
-def cmd(command, cwd=here):
+def cmd(command, cwd=here, **kwargs):
+    log.debug(f"Executing command: {command} in working directory {cwd}")
+    process = Popen(command, shell=True, cwd=cwd, stdout=PIPE, stderr=STDOUT, **kwargs)
+    while True:
+        output = process.stdout.readline()
+        if output == '' and process.poll() is not None:
+            break
+        if output:
+            command_log.log(CMD_LVL, output.strip())
+    return_code = process.poll()
+    if return_code > 0:
+        raise CalledProcessError(returncode=return_code, cmd=command)
     result = run(command, shell=True, cwd=cwd)
     result.check_returncode()
-    return result
 
 
-def program_installations(compile_ffmpeg, install_ffmpeg):
+def apt(command, cwd=here):
+    try:
+        return cmd(command, cwd)
+    except CalledProcessError:
+        cmd("apt update --fix-missing")
+        return cmd(command, cwd)
+
+
+def raspberry_proc_info(cores_only=False):
+    results = run("lscpu", stdout=PIPE).stdout.decode("utf-8").lower()
+    if cores_only:
+        for line in results.splitlines():
+            if line.startswith("cpu(s):"):
+                return int(line.split()[1].strip())
+        else:
+            return 1
+    log.info(f"Model Info: {Path('/proc/device-tree/model').read_text()}")
+    if "armv7" in results:
+        if "cortex-a72" in results:
+            log.info("Optimizing for cortex-a72 processor")
+            return (
+                "--arch=armv7 --cpu=cortex-a72 --enable-neon "
+                "--extra-cflags='-mtune=cortex-a72 -mfpu=neon-vfpv4 -mfloat-abi=hard'"
+            )
+        if "cortex-a53" in results:
+            log.info("Optimizing for cortex-a53 processor")
+            return (
+                "--arch=armv7 --cpu=cortex-a53 --enable-neon "
+                "--extra-cflags='-mtune=cortex-a53 -mfpu=neon-vfpv4 -mfloat-abi=hard'"
+            )
+        log.info("Using architecture 'armv7'")
+        return "--arch=armv7"
+    if "armv6" in results:
+        log.info("Using architecture 'armv6'")
+        return "--arch=armv6"
+    log.info("Defaulting to architecture 'armel'")
+    return "--arch=armel"
+
+
+def program_installations(compile_ffmpeg, install_ffmpeg, extra_libs, install_type):
     log.info("Installing nginx")
-    cmd("apt install -y nginx")
+    apt("apt install -y nginx")
+
+    ffmpeg_configures, apt_installs = [], []
+    possible_installs = {0: minimal_ffmpeg_config, 1: standard_ffmpeg_config, 2: all_ffmpeg_config}
+    if install_type not in possible_installs:
+        raise Exception(f"Unexpected install type {install_type}")
+
+    for f, a in possible_installs[install_type]:
+        ffmpeg_configures.append(f)
+        apt_installs.append(a)
+
+    ffmpeg_libs = "{}".format(" ".join(ffmpeg_configures))
 
     if compile_ffmpeg:
-        if (here / "FFmpeg" / "ffmpeg").exists():
+        if disable_overwrite and (here / "FFmpeg" / "ffmpeg").exists():
             log.info(f"FFmpeg is already compiled at {here / 'FFmpeg' / 'ffmpeg'}")
             if install_ffmpeg:
                 install_compiled_ffmpeg()
             return
         log.info("Installing FFmpeg requirements")
-        cmd(
-            "apt install -y git checkinstall build-essential libomxil-bellagio-dev "
-            "libfreetype6-dev libmp3lame-dev libx264-dev fonts-freefont-ttf libasound2-dev"
-        )
+        apt("apt install -y git checkinstall build-essential {}".format(" ".join(apt_installs)))
 
         if not (here / "FFmpeg").exists():
             log.info("Grabbing FFmpeg")
             cmd("git clone https://github.com/FFmpeg/FFmpeg.git --depth 1")
+        else:
+            log.info("FFmpeg exists: updating FFmpeg via git pull")
+            cmd("git pull", cwd=here / "FFmpeg")
 
         log.info("Configuring FFmpeg")
         cmd(
-            "./configure --arch=armel --target-os=linux --enable-gpl --enable-omx --enable-omx-rpi "
-            "--enable-libfreetype --enable-libx264 --enable-libmp3lame --enable-mmal"
-            " --enable-indev=alsa --enable-outdev=alsa",
+            f"./configure {raspberry_proc_info()} --target-os=linux "
+            '--extra-cflags="-I/usr/local/include" --extra-ldflags="-L/usr/local/lib" --extra-libs="-lpthread -lm" '
+            "--enable-static --disable-shared --disable-debug --enable-gpl --enable-version3 --enable-nonfree  "
+            f"{ffmpeg_libs} {extra_libs}",
             cwd=here / "FFmpeg",
         )
 
         log.info("Building FFmpeg (This will take a while)")
-        cmd("make -j4", cwd=here / "FFmpeg")
+        cmd(f"make {'-j4' if raspberry_proc_info(cores_only=True) >= 4 else ''}", cwd=here / "FFmpeg")
         if install_ffmpeg:
             install_compiled_ffmpeg()
 
 
+def ensure_library_dir():
+    lib_path = Path(here, "ffmpeg-libraries")
+    lib_path.mkdir(exist_ok=True)
+    return lib_path
+
+
+def install_fdk_aac():
+    if Path("/usr/local/lib/libfdk-aac.la").exists():
+        log.info("libfdk-aac already built")
+        return "--enable-libfdk-aac"
+
+    log.info("Building libfdk-aac")
+    lib_dir = ensure_library_dir()
+    sub_dir = lib_dir / "fdk_aac"
+    apt("apt install -y automake libtool")
+    if sub_dir.exists():
+        cmd("git pull", cwd=sub_dir)
+    else:
+        cmd(f"git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git fdk_aac", cwd=lib_dir)
+    cmd("autoreconf -fiv", cwd=sub_dir)
+    cmd("./configure", cwd=sub_dir)
+    cmd(f"make {'-j4' if raspberry_proc_info(cores_only=True) >= 4 else ''}", cwd=sub_dir)
+    cmd("make install", cwd=sub_dir)
+    return "--enable-libfdk-aac"
+
+
+def install_dav1d():
+    if shutil.which("dav1d"):
+        log.info("dav1d already built")
+        return "--enable-libdav1d"
+
+    log.info("Building dav1d")
+    lib_dir = ensure_library_dir()
+    sub_dir = lib_dir / "dav1d"
+    build_dir = sub_dir / "build"
+    build_dir.mkdir(exist_ok=True)
+
+    apt("apt install -y meson ninja-build")
+    if sub_dir.exists():
+        cmd("git pull", cwd=sub_dir)
+    else:
+        cmd(f"git clone --depth 1 https://code.videolan.org/videolan/dav1d.git dav1d", cwd=lib_dir)
+    cmd("meson ..", cwd=build_dir)
+    cmd("ninja", cwd=build_dir)
+    cmd("ninja install", cwd=build_dir)
+    return "--enable-libdav1d"
+
+
+def install_zimg():
+    if Path("/usr/local/lib/libzimg.la").exists():
+        log.info("libzimg already built")
+        return "--enable-libzimg"
+
+    log.info("Building libzimg")
+    lib_dir = ensure_library_dir()
+    sub_dir = lib_dir / "zimg"
+    if sub_dir.exists():
+        cmd("git pull", cwd=sub_dir)
+    else:
+        cmd(f"git clone https://github.com/sekrit-twc/zimg.git zimg", cwd=lib_dir)
+    cmd("sh autogen.sh", cwd=sub_dir)
+    cmd("./configure", cwd=sub_dir)
+    cmd("make", cwd=sub_dir)
+    cmd("make install", cwd=sub_dir)
+    return "--enable-libzimg"
+
+
+def install_kvazaar():
+    if shutil.which("kvazaar"):
+        log.info("libkvazaar already built")
+        return "--enable-libkvazaar"
+
+    log.info("Building libkvazaar")
+    lib_dir = ensure_library_dir()
+    sub_dir = lib_dir / "kvazaar"
+    if sub_dir.exists():
+        cmd("git pull", cwd=sub_dir)
+    else:
+        cmd(f"git clone --depth 1 https://github.com/ultravideo/kvazaar.git kvazaar", cwd=lib_dir)
+    cmd("sh autogen.sh", cwd=sub_dir)
+    cmd("./configure", cwd=sub_dir)
+    cmd(f"make {'-j4' if raspberry_proc_info(cores_only=True) >= 4 else ''}", cwd=sub_dir)
+    cmd("make install", cwd=sub_dir)
+    return "--enable-libkvazaar"
+
+
+# vmaf giving error: test/meson.build:7:0: ERROR:  Include directory to be added is not an include directory object.
+# def install_vmaf():
+#     # figure out how to detect vmaf installed
+#     lib_dir = ensure_library_dir()
+#     sub_dir = lib_dir / "vmaf" / "libvmaf"
+#
+#     log.info("Building libvmaf")
+#     apt("apt install -y meson ninja-build doxygen")
+#     if (lib_dir / "vmaf").exists():
+#         cmd("git pull", cwd=(lib_dir / "vmaf"))
+#     else:
+#         cmd(f"git clone --depth 1 https://github.com/ultravideo/kvazaar.git kvazaar", cwd=lib_dir)
+#     cmd("meson build --buildtype release", cwd=sub_dir)
+#     cmd("ninja -vC build", cwd=sub_dir)
+#     cmd("ninja -vC build install", cwd=sub_dir)
+#     return "--enable-libvmaf"
+
+
 def install_compiled_ffmpeg():
     log.info("Installing FFmpeg")
-    cmd("apt purge ffmpeg -y")
+    apt(f"apt remove ffmpeg -y {'' if disable_overwrite else '--allow-change-held-packages'} ")
     cmd("checkinstall --pkgname=ffmpeg -y", cwd=here / "FFmpeg")
     cmd("apt-mark hold ffmpeg")
     cmd('echo "ffmpeg hold" | sudo dpkg --set-selections')
@@ -179,6 +468,10 @@ fi
 
 
 def install_systemd_file(systemd_file, input_format, video_size, video_device):
+    ffmpeg_command = ("ffmpeg -nostdin -hide_banner -loglevel error "
+                      f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
+                      "-c:v copy -seg_duration 0.2 -remove_at_exit 1 -window_size 10 -f dash -hls_playlist 1 "
+                      "/dev/shm/streaming/manifest.mpd")
     systemd_contents = f"""# /etc/systemd/system/encode_webcam.service
 [Unit]
 Description=encode_webcam
@@ -187,8 +480,7 @@ After=network.target rc-local.service
 [Service]
 Restart=always
 RestartSec=20s
-ExecStart=ffmpeg -f v4l2 -input_format {input_format} -s {video_size} -i {video_device} -c:v copy -seg_duration 0.2 -remove_at_exit 1 -window_size 10 -f dash -hls_playlist 1 /dev/shm/streaming/manifest.mpd
-
+ExecStart={ffmpeg_command}
 [Install]
 WantedBy=multi-user.target
 """
@@ -198,8 +490,10 @@ WantedBy=multi-user.target
             log.info(f"File {systemd_file} already exists. Not overwriting with: \n{systemd_file}")
             return
         log.warning(f"Systemd file exists at {systemd_file}, overwriting")
+    log.info(f"Adding FFmpeg command to Systemd: {ffmpeg_command}")
     systemd_file.write_text(systemd_contents)
     systemd_file.chmod(0o755)
+    log.info(f"Systemd file created at {systemd_file}.")
 
 
 def start_services(on_reboot_file):
@@ -207,6 +501,13 @@ def start_services(on_reboot_file):
     cmd("systemctl daemon-reload")
     cmd("systemctl start encode_webcam")
     cmd("systemctl enable encode_webcam")
+
+
+def show_services():
+    ips = run("hostname -I", shell=True, stdout=PIPE).stdout.decode("utf-8")
+    hostname = run("hostname", shell=True, stdout=PIPE).stdout.decode("utf-8").strip()
+    for host in ips.split() + [hostname]:
+        log.info(f"Try viewing the stream at http://{host}/streaming")
 
 
 def main():
@@ -226,16 +527,41 @@ def main():
     if args.safe:
         disable_overwrite = True
 
-    program_installations(not args.disable_compile_ffmpeg, not args.disable_install_ffmpeg)
+    its = ("min", "standard", "all")
+    install_type = its.index(args.install_type.lower())
+    if install_type < 0:
+        raise Exception("Incorrect install type selected")
+    log.info(f"Performing '{its[install_type]}' install")
+
+    apt("apt install -y git build-essential")
+    extra_libs = []
+
+    if install_type >= 1 and not args.disable_fdk_aac:
+        extra_libs.append(install_fdk_aac())
+    if install_type >= 2 and not args.disable_zimg:
+        extra_libs.append(install_zimg())
+    if install_type >= 2 and not args.disable_dav1d:
+        extra_libs.append(install_dav1d())
+    if install_type >= 2 and not args.disable_kvazaar:
+        extra_libs.append(install_kvazaar())
+
+    cmd("ldconfig")
+
+    program_installations(
+        not args.disable_compile_ffmpeg,
+        not args.disable_install_ffmpeg,
+        extra_libs=" ".join(extra_libs),
+        install_type=install_type,
+    )
     update_rc_local_file(on_reboot_file=on_reboot_file)
     install_index_file(index_file=index_file, video_size=args.video_size)
     install_on_reboot_file(on_reboot_file=on_reboot_file, index_file=index_file)
     install_systemd_file(
-        systemd_file=systemd_file,
-        input_format=args.input_format,
-        video_size=args.video_size,
-        video_device=args.device,
+        systemd_file=systemd_file, input_format=args.input_format, video_size=args.video_size, video_device=args.device,
     )
+    start_services(on_reboot_file=on_reboot_file)
+    log.info("Install complete!")
+    show_services()
 
 
 if __name__ == "__main__":
