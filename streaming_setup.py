@@ -28,7 +28,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -38,6 +38,11 @@ logging.addLevelName(CMD_LVL, "CMD")
 logging.basicConfig(level=logging.DEBUG,
                     format="%(asctime)s - %(name)-12s  %(levelname)-8s %(message)s",
                     filename=f"streaming_setup_{datetime.datetime.now().strftime('%Y%M%d_%H%M%S')}.log")
+
+sh = logging.StreamHandler(sys.stdout)
+log.setLevel(logging.DEBUG)
+command_log.setLevel(logging.DEBUG)
+log.addHandler(sh)
 
 here = Path(__file__).parent
 disable_overwrite = False
@@ -114,11 +119,16 @@ all_ffmpeg_config = standard_ffmpeg_config + [
     ("--enable-libdrm", "libdrm-dev"),
     ("--enable-openal", "libopenal-dev"),
     ("--enable-opengl", "libopengl-dev"),
-    # ('--enable-ladspa', 'libsoxr-dev'),
-    # ('--enable-libxavs', ''),
-    # ('--enable-avisynth', ''),
+    ('--enable-ladspa', 'libags-audio-dev libladspa-ocaml-dev'),
+    ('--enable-sdl2', 'libsdl2-dev'),
+    ('--enable-libcodec2', 'libcodec2-dev'),
+    ('--enable-lv2', 'lv2-dev liblilv-dev'),
     # ('--enable-gray', ''),
+    # ('--enable-rpi', ''),
     # ('--enable-libsrt', ''),
+    # ('--enable-sdl2', ''),
+    # ('--enable-libaom', ''),
+    # ('--enable-libmysofa', 'libmysofa-dev'), # ERROR: libmysofa not found
     # ('--enable-libsmbclient', 'libsmbclient-dev'), # ERROR: libsmbclient not found
     # ('--enable-libopencv', 'libopencv-dev libopencv-apps-dev'),  # ERROR: libopencv not found
     # ('--enable-libiec61883', 'libiec61883-dev libiec61883-0'),  # ERROR: libiec61883 not found
@@ -127,27 +137,18 @@ all_ffmpeg_config = standard_ffmpeg_config + [
 
 
 def parse_arguments():
-    # TODO auto detect video size and codec, and if need to install
-    # TODO add input fps rate
-    video_devices = list(Path("/dev/").glob("video*"))
-    default_video_device = str(video_devices[0]) if video_devices else "/dev/video0"
+    device, fmt, resolution = find_best_device()
 
     parser = ArgumentParser(prog="streaming_setup", description=f"streaming_setup version {__version__}")
     parser.add_argument("-v", "--version", action="store_true")
     parser.add_argument(
-        "-d", "-i", "--device", default=default_video_device, help=f"Camera (using {default_video_device} currently)"
+        "-d", "-i", "--device", default=str(device), help=f"Camera. Selected: {device}"
     )
     parser.add_argument(
-        "-s", "--video-size", default="1920x1080", help="The video size from the camera (NOT AUTO DETECTED)"
+        "-s", "--video-size", default=resolution, help=f"The video resolution from the camera (using {resolution})"
     )
     parser.add_argument(
-        "-f", "--input-format", default="h264", help="The format the camera supports (NOT AUTO DETECTED)"
-    )
-    parser.add_argument(
-        "-t",
-        "--install-type",
-        default="standard",
-        help="(min,standard,all) Which selection of ffmpeg libraries to use. Defaults to 'standard'",
+        "-f", "--input-format", default=fmt, help=f"The format the camera supports (using {fmt})"
     )
     parser.add_argument(
         "-c", "--codec",
@@ -161,26 +162,33 @@ def parse_arguments():
     parser.add_argument("--index-file", default="/var/www/html/index.html")
     parser.add_argument("--on-reboot-file", default="/opt/setup_streaming.sh")
     parser.add_argument("--systemd-file", default="/etc/systemd/system/encode_webcam.service")
-    parser.add_argument("--disable-compile-ffmpeg", action="store_true")
-    parser.add_argument("--disable-install-ffmpeg", action="store_true")
+    parser.add_argument("--compile-ffmpeg", action="store_true")
+    parser.add_argument(
+        "--install-type",
+        default="standard",
+        help="(min,standard,all) When compiling, select which ffmpeg libraries to use. Defaults to 'standard'",
+    )
     parser.add_argument("--disable-fdk-aac", action="store_true", help="Normally installed on 'standard' install")
+    parser.add_argument("--disable_avisynth", action="store_true", help="Normally installed on 'standard' install")
     parser.add_argument("--disable-dav1d", action="store_true", help="Normally installed on 'all' install")
     parser.add_argument("--disable-zimg", action="store_true", help="Normally installed on 'all' install")
     parser.add_argument("--disable_kvazaar", action="store_true", help="Normally installed on 'all' install")
+    parser.add_argument("--disable_libxavs", action="store_true", help="Normally installed on 'all' install")
     # parser.add_argument("--disable_vmaf", action="store_true")
     parser.add_argument("--safe", action="store_true", help="disable overwrite of existing scripts")
     return parser.parse_args()
 
 
-def cmd(command, cwd=here, **kwargs):
+def cmd(command, cwd=here, env=None, **kwargs):
     log.debug(f"Executing command: {command} in working directory {cwd}")
-    process = Popen(command, shell=True, cwd=cwd, stdout=PIPE, stderr=STDOUT, **kwargs)
+    if env:
+        env.update(os.environ.copy())
+    process = Popen(command, shell=True, cwd=cwd, stdout=PIPE, stderr=STDOUT, env=env, **kwargs)
     while True:
-        output = process.stdout.readline()
+        output = process.stdout.readline().decode("utf-8").strip()
         if output == '' and process.poll() is not None:
             break
-        if output:
-            command_log.log(CMD_LVL, output.strip())
+        command_log.log(CMD_LVL, output)
     return_code = process.poll()
     if return_code > 0:
         raise CalledProcessError(returncode=return_code, cmd=command)
@@ -207,12 +215,14 @@ def raspberry_proc_info(cores_only=False):
     log.info(f"Model Info: {Path('/proc/device-tree/model').read_text()}")
     if "armv7" in results:
         if "cortex-a72" in results:
+            # Raspberry Pi 4 Model B
             log.info("Optimizing for cortex-a72 processor")
             return (
                 "--arch=armv7 --cpu=cortex-a72 --enable-neon "
                 "--extra-cflags='-mtune=cortex-a72 -mfpu=neon-vfpv4 -mfloat-abi=hard'"
             )
         if "cortex-a53" in results:
+            # Raspberry Pi 3 Model B
             log.info("Optimizing for cortex-a53 processor")
             return (
                 "--arch=armv7 --cpu=cortex-a53 --enable-neon "
@@ -221,10 +231,77 @@ def raspberry_proc_info(cores_only=False):
         log.info("Using architecture 'armv7'")
         return "--arch=armv7"
     if "armv6" in results:
+        # Raspberry Pi Zero
         log.info("Using architecture 'armv6'")
         return "--arch=armv6"
     log.info("Defaulting to architecture 'armel'")
     return "--arch=armel"
+
+def camera_info(device, hide_error=False):
+    # ffmpeg -hide_banner -f video4linux2 -list_formats all -i /dev/video0
+    # [video4linux2,v4l2 @ 0xf0cf70] Raw       :     yuyv422 :           YUYV 4:2:2 : {32-2592, 2}x{32-1944, 2}
+    # [video4linux2,v4l2 @ 0xf0cf70] Compressed:       mjpeg :            JFIF JPEG : {32-2592, 2}x{32-1944, 2}
+    # [video4linux2,v4l2 @ 0xf0cf70] Compressed:        h264 :                H.264 : {32-2592, 2}x{32-1944, 2}
+    # [video4linux2,v4l2 @ 0xf0cf70] Compressed:       mjpeg :          Motion-JPEG : {32-2592, 2}x{32-1944, 2}
+    data = run(f"ffmpeg -hide_banner -f video4linux2 -list_formats all -i {device}", shell=True, stdout=PIPE, stderr=PIPE)
+    stdout, stderr = data.stdout.decode('utf-8'), data.stderr.decode('utf-8')
+    if "Not a video capture device" in stdout or "Not a video capture device" in stderr:
+        if not hide_error:
+            log.error(f"{device} is not a video capture device ")
+        return
+
+    def get_best_resolution(res):
+        if "{" in res:
+            try:
+                w, h = res.split("x")
+                w = w[w.index("-")+1:w.index(",")]
+                h = h[h.index("-")+1:h.index(",")]
+                return f"{w}x{h}"
+            except Exception:
+                log.exception(f"Couldn't figure out resolution from: {res}")
+        else:
+            bw, bh = 0, 0
+            for option in res.split():
+                try:
+                    w, h = option.split("x")
+                    w, h = int(w), int(h)
+                    if w * h > bw * bh:
+                        bw, bh = w, h
+                except Exception:
+                    log.exception(f"Couldn't figure out resolution from: {option}")
+            return f"{bw}x{bh}"
+
+    supported_formats = {}
+    for line in stderr.splitlines():
+        if not line.startswith("[video4linux2") or line.count(": ") <= 2:
+            continue
+        try:
+            _, fmt, _, resolution = line.split("]", 1)[1].split(": ")
+        except ValueError as err:
+            log.exception(f"Could not parse format line '{line}'")
+            continue
+        if fmt.strip() != "Unsupported":
+            supported_formats[fmt.strip()] = get_best_resolution(resolution.strip())
+    return supported_formats
+
+
+def find_best_device():
+    current_best = ("", {})
+    for device in Path("/dev/").glob("video*"):
+        options = camera_info(device, hide_error=True)
+        if not options:
+            continue
+        if 'h264' in options:
+            current_best = (device, options)
+        elif 'h264' not in current_best[1]:
+            current_best = (device, options)
+    if not current_best[0]:
+        return "/dev/video0", "h264", "1920x1080"  # Assume user will connect pi camera
+    for fmt in ('h264', 'mjpeg', 'yuyv422', 'yuv420p'):
+        if fmt in current_best[1]:
+            return current_best[0], fmt, current_best[1][fmt]
+    fmt, res = list(current_best[1].items())[0]
+    return current_best[0], fmt, res
 
 
 def program_installations(compile_ffmpeg, install_ffmpeg, extra_libs, install_type):
@@ -261,7 +338,10 @@ def program_installations(compile_ffmpeg, install_ffmpeg, extra_libs, install_ty
         log.info("Configuring FFmpeg")
         cmd(
             f"./configure {raspberry_proc_info()} --target-os=linux "
-            '--extra-cflags="-I/usr/local/include" --extra-ldflags="-L/usr/local/lib" --extra-libs="-lpthread -lm" '
+            f"--libdir=/usr/lib/arm-linux-gnueabihf --incdir=/usr/include/arm-linux-gnueabihf "
+            '--extra-cflags="-I/usr/local/include -I/usr/include/arm-linux-gnueabihf" '
+            '--extra-ldflags="-L/usr/local/lib -L/usr/lib/arm-linux-gnueabihf" '
+            '--extra-libs="-lpthread -lm" '
             "--enable-static --disable-shared --disable-debug --enable-gpl --enable-version3 --enable-nonfree  "
             f"{ffmpeg_libs} {extra_libs}",
             cwd=here / "FFmpeg",
@@ -299,6 +379,44 @@ def install_fdk_aac():
     return "--enable-libfdk-aac"
 
 
+def install_avisynth():
+    if Path("/usr/local/include/avisynth/avisynth_c.h").exists():
+        log.info("AviSynth headers already built")
+        return "--enable-avisynth"
+
+    log.info("Building AviSynth headers")
+    lib_dir = ensure_library_dir()
+    sub_dir = lib_dir / "AviSynthPlus"
+    if sub_dir.exists():
+        cmd("git pull", cwd=sub_dir)
+    else:
+        cmd(f"git clone --depth 1 https://github.com/AviSynth/AviSynthPlus.git AviSynthPlus", cwd=lib_dir)
+    build_dir = sub_dir / "avisynth-build"
+    build_dir.mkdir(exist_ok=True)
+    cmd("cmake ../ -DHEADERS_ONLY:bool=on", cwd=build_dir)
+    cmd("make install", cwd=build_dir)
+    return "--enable-avisynth"
+
+
+def install_libxavs():
+    if shutil.which("xavs"):
+        log.info("xavs already built")
+        return "--enable-libxavs"
+
+    log.info("Building xavs headers")
+    apt("apt install -y subversion")
+    lib_dir = ensure_library_dir()
+    sub_dir = lib_dir / "xavs"
+    if sub_dir.exists():
+        cmd("git pull", cwd=sub_dir)
+    else:
+        cmd(f"svn co https://svn.code.sf.net/p/xavs/code/trunk xavs", cwd=lib_dir)
+    cmd("./configure --enable-shared", cwd=sub_dir)
+    cmd("make", cwd=sub_dir)
+    cmd("make install", cwd=sub_dir)
+    return "--enable-libxavs"
+
+# svn co https://svn.code.sf.net/p/xavs/code/trunk xavs
 def install_dav1d():
     if shutil.which("dav1d"):
         log.info("dav1d already built")
@@ -533,17 +651,21 @@ def main():
         raise Exception("Incorrect install type selected")
     log.info(f"Performing '{its[install_type]}' install")
 
-    apt("apt install -y git build-essential")
-    extra_libs = []
-
-    if install_type >= 1 and not args.disable_fdk_aac:
-        extra_libs.append(install_fdk_aac())
-    if install_type >= 2 and not args.disable_zimg:
-        extra_libs.append(install_zimg())
-    if install_type >= 2 and not args.disable_dav1d:
-        extra_libs.append(install_dav1d())
-    if install_type >= 2 and not args.disable_kvazaar:
-        extra_libs.append(install_kvazaar())
+    if not args.disable_compile_ffmpeg and install_type >= 1:
+        apt("apt install -y git build-essential")
+        extra_libs = []
+        if install_type >= 1 and not args.disable_fdk_aac:
+            extra_libs.append(install_fdk_aac())
+        if install_type >= 1 and not args.disable_avisynth:
+            extra_libs.append(install_avisynth())
+        if install_type >= 2 and not args.disable_zimg:
+            extra_libs.append(install_zimg())
+        if install_type >= 2 and not args.disable_dav1d:
+            extra_libs.append(install_dav1d())
+        if install_type >= 2 and not args.disable_kvazaar:
+            extra_libs.append(install_kvazaar())
+        if install_type >= 2 and not args.disable_libxavs:
+            extra_libs.append(install_libxavs())
 
     cmd("ldconfig")
 
