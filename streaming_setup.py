@@ -231,9 +231,6 @@ def raspberry_proc_info(cores_only=False):
         else:
             return 1
     log.info(f"Model Info: {Path('/proc/device-tree/model').read_text()}")
-    if "aarch64" in results:
-        log.info("Using architecture 'aarch64'")
-        return "--arch=aarch64"
     if "armv7" in results:
         if "cortex-a72" in results:
             # Raspberry Pi 4 Model B
@@ -255,6 +252,13 @@ def raspberry_proc_info(cores_only=False):
         # Raspberry Pi Zero
         log.info("Using architecture 'armv6'")
         return "--arch=armv6"
+    if "aarch64" in results:
+        # Using new raspberry pi 64 bit OS
+        log.info("Using architecture 'aarch64'")
+        raise Exception("This may break with the current Raspberry Pi 64 bit build as of 07/2020. "
+                        "Only remove this line of code and uncomment next one "
+                        "if you are prepared to reinstall the OS if it doesn't work. (Please report if it works)")
+        # return "--arch=aarch64"
     log.info("Defaulting to architecture 'armel'")
     return "--arch=armel"
 
@@ -358,6 +362,7 @@ def compile_ffmpeg(extra_libs, install_type):
         apt_installs.append(a)
 
     ffmpeg_libs = "{}".format(" ".join(ffmpeg_configures))
+    processor_info = raspberry_proc_info()  # Needs to be here to proper error before the apt install
 
     log.info("Installing FFmpeg requirements")
     apt("apt install -y git checkinstall build-essential {}".format(" ".join(apt_installs)))
@@ -372,7 +377,7 @@ def compile_ffmpeg(extra_libs, install_type):
 
     log.info("Configuring FFmpeg")
     cmd(
-        f"./configure {raspberry_proc_info()} --target-os=linux "
+        f"./configure {processor_info} --target-os=linux "
         '--extra-libs="-lpthread -lm" '
         "--enable-static --disable-shared --disable-debug --enable-gpl --enable-version3 --enable-nonfree  "
         f"{ffmpeg_libs} {extra_libs}",
@@ -713,6 +718,8 @@ def main():
             log.critical(f"Cannot run as {run_as} as that user does not exist!")
             sys.exit(1)
 
+    log.info(f"Starting streaming_setup {__version__}")
+    log.debug(f"Using arguments: {vars(args)}")
     index_file = Path(args.index_file)
     on_reboot_file = Path(args.on_reboot_file)
     systemd_file = Path(args.systemd_file)
