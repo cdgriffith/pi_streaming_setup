@@ -71,7 +71,7 @@ standard_ffmpeg_config = minimal_ffmpeg_config + [
     ("--enable-libvorbis", "libvorbis-dev"),
     ("--enable-libopus", "libopus-dev"),
     ("--enable-libtheora", "libtheora-dev"),
-    ("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"),
+    ("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"),  # aarch64 64 issues
     ("--enable-librtmp", "librtmp-dev"),
 ]
 
@@ -120,7 +120,7 @@ all_ffmpeg_config = standard_ffmpeg_config + [
     ("--enable-libzvbi", "libzvbi-dev"),
     ("--enable-libdrm", "libdrm-dev"),
     ("--enable-openal", "libopenal-dev"),
-    ("--enable-opengl", "libopengl-dev"),
+    ("--enable-opengl", "libopengl-dev"),  # aarch64 issues
     ("--enable-ladspa", "libags-audio-dev libladspa-ocaml-dev"),
     ("--enable-sdl2", "libsdl2-dev"),
     ("--enable-libcodec2", "libcodec2-dev"),
@@ -231,6 +231,9 @@ def raspberry_proc_info(cores_only=False):
         else:
             return 1
     log.info(f"Model Info: {Path('/proc/device-tree/model').read_text()}")
+    if "aarch64" in results:
+        log.info("Using architecture 'aarch64'")
+        return "--arch=aarch64"
     if "armv7" in results:
         if "cortex-a72" in results:
             # Raspberry Pi 4 Model B
@@ -337,6 +340,9 @@ def install_nginx():
 
 
 def install_ffmpeg():
+    if shutil.which("ffmpeg"):
+        log.info("ffmpeg already installed, skipping")
+        return
     log.info("Installing FFmpeg")
     apt("apt install -y ffmpeg")
 
@@ -416,6 +422,7 @@ def install_avisynth():
         return "--enable-avisynth"
 
     log.info("Building AviSynth headers")
+    apt("apt install -y cmake")
     lib_dir = ensure_library_dir()
     sub_dir = lib_dir / "AviSynthPlus"
     if sub_dir.exists():
@@ -605,8 +612,7 @@ def install_index_file(index_file, video_size):
         <video data-dashjs-player autoplay controls src="manifest.mpd" type="application/dash+xml"></video>
     </div>
 </div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/3.1.1/dash.all.min.js"
-        integrity="sha256-RYx6+kVtfAQxIe6ofElKV1LwPsIrZUu6nfLN8C94nrU=" crossorigin="anonymous"></script>
+<script src="http://cdn.dashjs.org/latest/dash.all.debug.js" ></script>
 </body>
 </html>
 """
@@ -641,7 +647,7 @@ def install_systemd_file(systemd_file, input_format, video_size, video_device, c
     ffmpeg_command = (
         "ffmpeg -nostdin -hide_banner -loglevel error "
         f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
-        f"-c:v {codec} {ffmpeg_params} "
+        f"-c:v {codec} {ffmpeg_params if ffmpeg_params else ''} "
         "-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 -hls_playlist 1 "
         "/dev/shm/streaming/manifest.mpd"
     )
@@ -670,11 +676,11 @@ WantedBy=multi-user.target
     log.info(f"Systemd file created at {systemd_file}.")
 
 
-def start_services(on_reboot_file):
+def start_services(on_reboot_file, systemd_file):
     cmd(f"/bin/bash {on_reboot_file}", demote=False)
     cmd("systemctl daemon-reload", demote=False)
-    cmd("systemctl start encode_webcam", demote=False)
-    cmd("systemctl enable encode_webcam", demote=False)
+    cmd(f"systemctl start {systemd_file.stem}", demote=False)
+    cmd(f"systemctl enable {systemd_file.stem}", demote=False)
 
 
 def show_services():
@@ -762,7 +768,7 @@ def main():
         codec=args.codec,
         ffmpeg_params=args.ffmpeg_params,
     )
-    start_services(on_reboot_file=on_reboot_file)
+    start_services(on_reboot_file=on_reboot_file, systemd_file=systemd_file)
     log.info("Install complete!")
     show_services()
 
