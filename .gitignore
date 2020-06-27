@@ -108,11 +108,4 @@ venv*/
 .idea/
 
 config.yaml
-*.bat
-*.sh
-binary-files/
-SvtAv1/
-bundled
-extra/
-*.7z
-binary-files/
+*.log

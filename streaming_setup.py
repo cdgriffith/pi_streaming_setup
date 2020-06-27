@@ -7,14 +7,14 @@ compatible video4linux2 camera into a MPEG-DASH / HLS streaming server.
 The steps it will attempt to take:
 
 * Install nginx
-* Install ffmpeg OR (optional) Compile and Install FFmpeg with h264 hardware acceleration
+* Install FFmpeg OR (optional) Compile and Install FFmpeg with h264 hardware acceleration
 * Update rc.local to run required setup script on reboot
 * Create index.html file to view video stream at
 * Create systemd service and enable it
 
 If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
 
-If you are compilng FFMpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
+If you are compilng FFmpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
 You will not be able to share the built binaries under any license.
 """
 
@@ -63,8 +63,7 @@ minimal_ffmpeg_config = [
     ("--enable-libfreetype", "libfreetype6-dev fonts-freefont-ttf"),
 ]
 
-# Recommenced, also installs fdk-aac and avisynth (takes about 15 minutes on a Pi 4)
-standard_ffmpeg_config = minimal_ffmpeg_config + [
+all_ffmpeg_config = minimal_ffmpeg_config + [
     ("--enable-libx265", "libx265-dev"),
     ("--enable-libvpx", "libvpx-dev"),
     ("--enable-libmp3lame", "libmp3lame-dev"),
@@ -73,10 +72,6 @@ standard_ffmpeg_config = minimal_ffmpeg_config + [
     ("--enable-libtheora", "libtheora-dev"),
     ("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"),  # aarch64 64 issues
     ("--enable-librtmp", "librtmp-dev"),
-]
-
-# Everything and the kitchen sink
-all_ffmpeg_config = standard_ffmpeg_config + [
     ("--enable-libass", "libass-dev"),
     ("--enable-avresample", "libavresample-dev"),
     ("--enable-fontconfig", "libfontconfig1-dev"),
@@ -159,22 +154,22 @@ def parse_arguments():
         "--camera-info", action="store_true", help="Show all detected cameras [/dev/video(0-9)] and exit"
     )
     parser.add_argument(
-        "--install-type",
-        default="standard",
-        help="(min,standard,all) When compiling, select which FFmpeg libraries to use. Defaults to 'standard'",
+        "--minimal",
+        action="store_true",
+        help="Minimal FFmpeg compile including h264, x264, alsa sound and fonts",
     )
     parser.add_argument(
         "--run-as", default="root", help="compile programs as provided user (suggested 'pi', defaults to 'root')"
     )
-    parser.add_argument("--disable-fdk-aac", action="store_true", help="Normally installed on 'standard' install")
-    parser.add_argument("--disable_avisynth", action="store_true", help="Normally installed on 'standard' install")
-    parser.add_argument("--disable-dav1d", action="store_true", help="Normally installed on 'all' install")
-    parser.add_argument("--disable-zimg", action="store_true", help="Normally installed on 'all' install")
-    parser.add_argument("--disable-kvazaar", action="store_true", help="Normally installed on 'all' install")
-    parser.add_argument("--disable-libxavs", action="store_true", help="Normally installed on 'all' install")
-    parser.add_argument("--disable-libsrt", action="store_true", help="Normally installed on 'all' install")
+    parser.add_argument("--disable-fdk-aac", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable_avisynth", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-dav1d", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-zimg", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-kvazaar", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-libxavs", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-libsrt", action="store_true", help="Normally installed on full install")
     parser.add_argument("--rebuild-all", action="store_true", help="Recompile all libraries")
-    parser.add_argument("--safe", action="store_true", help="disable overwrite of existing scripts")
+    parser.add_argument("--safe", action="store_true", help="disable overwrite of existing or old scripts")
     return parser.parse_args()
 
 
@@ -351,13 +346,10 @@ def install_ffmpeg():
     apt("apt install -y ffmpeg")
 
 
-def compile_ffmpeg(extra_libs, install_type):
+def compile_ffmpeg(extra_libs, minimal_install=False):
     ffmpeg_configures, apt_installs = [], []
-    possible_installs = {0: minimal_ffmpeg_config, 1: standard_ffmpeg_config, 2: all_ffmpeg_config}
-    if install_type not in possible_installs:
-        raise Exception(f"Unexpected install type {install_type}")
 
-    for f, a in possible_installs[install_type]:
+    for f, a in (all_ffmpeg_config if not minimal_install else minimal_install):
         ffmpeg_configures.append(f)
         apt_installs.append(a)
 
@@ -734,32 +726,28 @@ def main():
     if args.compile_ffmpeg:
         if args.rebuild_all:
             rebuild_all = True
-        its = ("min", "standard", "all")
-        install_type = its.index(args.install_type.lower())
-        if install_type < 0:
-            raise Exception("Incorrect FFmpeg compile type selected")
 
-        log.info(f"Performing '{its[install_type]}' FFmpeg compile")
+        log.info(f"Performing \"{'minimal' if args.minimal else 'full'}\" FFmpeg compile")
         apt("apt install -y git build-essential")
         extra_libs = []
-        if install_type >= 1 and not args.disable_fdk_aac:
-            extra_libs.append(install_fdk_aac())
-        if install_type >= 1 and not args.disable_avisynth:
-            extra_libs.append(install_avisynth())
-        if install_type >= 2 and not args.disable_zimg:
-            extra_libs.append(install_zimg())
-        if install_type >= 2 and not args.disable_dav1d:
-            extra_libs.append(install_dav1d())
-        if install_type >= 2 and not args.disable_kvazaar:
-            extra_libs.append(install_kvazaar())
-        if install_type >= 2 and not args.disable_libxavs:
-            extra_libs.append(install_libxavs())
-        if install_type >= 2 and not args.disable_libsrt:
-            extra_libs.append(install_srt())
-
-        cmd("ldconfig", demote=False)
+        if not args.minimal:
+            if not args.disable_fdk_aac:
+                extra_libs.append(install_fdk_aac())
+            if not args.disable_avisynth:
+                extra_libs.append(install_avisynth())
+            if not args.disable_zimg:
+                extra_libs.append(install_zimg())
+            if not args.disable_dav1d:
+                extra_libs.append(install_dav1d())
+            if not args.disable_kvazaar:
+                extra_libs.append(install_kvazaar())
+            if not args.disable_libxavs:
+                extra_libs.append(install_libxavs())
+            if not args.disable_libsrt:
+                extra_libs.append(install_srt())
+            cmd("ldconfig", demote=False)
         compile_ffmpeg(
-            extra_libs=" ".join(extra_libs), install_type=install_type,
+            extra_libs=" ".join(extra_libs), minimal_install=args.minimal,
         )
     else:
         install_ffmpeg()
