@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 This script is designed to help automate turing a raspberry pi with a
 compatible video4linux2 camera into a MPEG-DASH / HLS streaming server.
@@ -6,18 +7,17 @@ compatible video4linux2 camera into a MPEG-DASH / HLS streaming server.
 The steps it will attempt to take:
 
 * Install nginx
-* Compile and Install FFmpeg with h264 hardware acceleration via h264_omx (optional)
+* Install FFmpeg OR (optional) Compile and Install FFmpeg with h264 hardware acceleration
 * Update rc.local to run required setup script on reboot
 * Create index.html file to view video stream at
-* Create encode_webcam systemd service and enable it
+* Create systemd service and enable it
 
-If running over SSH, please use in a background terminal like "tmux" or "screen" due to compile time.
+If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
 
-This will build a NON REDISTRIBUTABLE FFmpeg. Please be aware you will not be able to share the built binaries
-under any license.
-
-
+If you are compilng FFmpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
+You will not be able to share the built binaries under any license.
 """
+
 import logging
 import os
 import sys
@@ -29,16 +29,18 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
 CMD_LVL = 15
 logging.addLevelName(CMD_LVL, "CMD")
 
-logging.basicConfig(level=logging.DEBUG,
-                    format="%(asctime)s - %(name)-12s  %(levelname)-8s %(message)s",
-                    filename=f"streaming_setup_{datetime.datetime.now().strftime('%Y%M%d_%H%M%S')}.log")
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)-12s  %(levelname)-8s %(message)s",
+    filename=f"streaming_setup_{datetime.datetime.now().strftime('%Y%M%d_%H%M%S')}.log",
+)
 
 sh = logging.StreamHandler(sys.stdout)
 log.setLevel(logging.DEBUG)
@@ -47,7 +49,7 @@ log.addHandler(sh)
 
 here = Path(__file__).parent
 disable_overwrite = False
-run_as = 'root'
+run_as = "root"
 rebuild_all = False
 
 # Different levels of FFmpeg configurations
@@ -61,20 +63,15 @@ minimal_ffmpeg_config = [
     ("--enable-libfreetype", "libfreetype6-dev fonts-freefont-ttf"),
 ]
 
-# Recommenced, also installs fdk-aac  (takes about 15 minutes on a Pi 4)
-standard_ffmpeg_config = minimal_ffmpeg_config + [
+all_ffmpeg_config = minimal_ffmpeg_config + [
     ("--enable-libx265", "libx265-dev"),
     ("--enable-libvpx", "libvpx-dev"),
     ("--enable-libmp3lame", "libmp3lame-dev"),
     ("--enable-libvorbis", "libvorbis-dev"),
     ("--enable-libopus", "libopus-dev"),
     ("--enable-libtheora", "libtheora-dev"),
-    ("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"),
+    ("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"),  # aarch64 64 issues
     ("--enable-librtmp", "librtmp-dev"),
-]
-
-# Everything and the kitchen sink
-all_ffmpeg_config = standard_ffmpeg_config + [
     ("--enable-libass", "libass-dev"),
     ("--enable-avresample", "libavresample-dev"),
     ("--enable-fontconfig", "libfontconfig1-dev"),
@@ -118,15 +115,15 @@ all_ffmpeg_config = standard_ffmpeg_config + [
     ("--enable-libzvbi", "libzvbi-dev"),
     ("--enable-libdrm", "libdrm-dev"),
     ("--enable-openal", "libopenal-dev"),
-    ("--enable-opengl", "libopengl-dev"),
-    ('--enable-ladspa', 'libags-audio-dev libladspa-ocaml-dev'),
-    ('--enable-sdl2', 'libsdl2-dev'),
-    ('--enable-libcodec2', 'libcodec2-dev'),
-    ('--enable-lv2', 'lv2-dev liblilv-dev'),
-    ('--enable-libaom', 'libaom-dev'),
-    # ("--enable-libopencore-amrwb", "libopencore-amrwb-dev"),
-    # ("--enable-libopencore-amrnb", "libopencore-amrnb-dev"),
-    # ("--enable-libvo-amrwbenc", "libvo-amrwbenc-dev"),
+    ("--enable-opengl", "libopengl-dev"),  # aarch64 issues
+    ("--enable-ladspa", "libags-audio-dev libladspa-ocaml-dev"),
+    ("--enable-sdl2", "libsdl2-dev"),
+    ("--enable-libcodec2", "libcodec2-dev"),
+    ("--enable-lv2", "lv2-dev liblilv-dev"),
+    ("--enable-libaom", "libaom-dev"),
+    ("--enable-libopencore-amrwb", "libopencore-amrwb-dev"),
+    ("--enable-libopencore-amrnb", "libopencore-amrnb-dev"),
+    ("--enable-libvo-amrwbenc", "libvo-amrwbenc-dev"),
     # ('--enable-libmysofa', 'libmysofa-dev'), # error: 'mysofa_neighborhood_init_withstepdefine' undeclared
     # ('--enable-libsmbclient', 'libsmbclient-dev'),  # not found, even with --extra-cflags="-I/usr/include/samba-4.0"
     # ('--enable-libiec61883', 'libiec61883-dev libiec61883-0'), # cannot find -lavc1394, cannot find -lrom1394
@@ -139,44 +136,40 @@ def parse_arguments():
 
     parser = ArgumentParser(prog="streaming_setup", description=f"streaming_setup version {__version__}")
     parser.add_argument("-v", "--version", action="store_true")
-    parser.add_argument(
-        "-d", "-i", "--device", default=str(device), help=f"Camera. Selected: {device}"
-    )
+    parser.add_argument("-d", "-i", "--device", default=str(device), help=f"Camera. Selected: {device}")
     parser.add_argument(
         "-s", "--video-size", default=resolution, help=f"The video resolution from the camera (using {resolution})"
     )
-    parser.add_argument(
-        "-f", "--input-format", default=fmt, help=f"The format the camera supports (using {fmt})"
-    )
-    parser.add_argument(
-        "-c", "--codec",
-        default=codec,
-        help=f"Conversion codec (using '{codec}')"
-    )
+    parser.add_argument("-f", "--input-format", default=fmt, help=f"The format the camera supports (using {fmt})")
+    parser.add_argument("-c", "--codec", default=codec, help=f"Conversion codec (using '{codec}')")
     parser.add_argument(
         "--ffmpeg-params",
-        help="specify additional FFmpeg params, helpful if not copying codec e.g.: '-b:v 4M -maxrate 4M -buffsize 8M' "
+        help="specify additional FFmpeg params, helpful if not copying codec e.g.: '-b:v 4M -maxrate 4M -buffsize 8M' ",
     )
     parser.add_argument("--index-file", default="/var/lib/streaming/index.html")
     parser.add_argument("--on-reboot-file", default="/var/lib/streaming/setup_streaming.sh")
-    parser.add_argument("--systemd-file", default="/etc/systemd/system/encode_webcam.service")
+    parser.add_argument("--systemd-file", default="/etc/systemd/system/stream_camera.service")
     parser.add_argument("--compile-ffmpeg", action="store_true")
     parser.add_argument(
-        "--install-type",
-        default="standard",
-        help="(min,standard,all) When compiling, select which FFmpeg libraries to use. Defaults to 'standard'",
+        "--camera-info", action="store_true", help="Show all detected cameras [/dev/video(0-9)] and exit"
     )
-    parser.add_argument("--run-as", default="root",
-                        help="compile programs as provided user (suggested 'pi', defaults to 'root')")
-    parser.add_argument("--disable-fdk-aac", action="store_true", help="Normally installed on 'standard' install")
-    parser.add_argument("--disable_avisynth", action="store_true", help="Normally installed on 'standard' install")
-    parser.add_argument("--disable-dav1d", action="store_true", help="Normally installed on 'all' install")
-    parser.add_argument("--disable-zimg", action="store_true", help="Normally installed on 'all' install")
-    parser.add_argument("--disable-kvazaar", action="store_true", help="Normally installed on 'all' install")
-    parser.add_argument("--disable-libxavs", action="store_true", help="Normally installed on 'all' install")
-    parser.add_argument("--disable-libsrt", action="store_true", help="Normally installed on 'all' install")
+    parser.add_argument(
+        "--minimal",
+        action="store_true",
+        help="Minimal FFmpeg compile including h264, x264, alsa sound and fonts",
+    )
+    parser.add_argument(
+        "--run-as", default="root", help="compile programs as provided user (suggested 'pi', defaults to 'root')"
+    )
+    parser.add_argument("--disable-fdk-aac", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable_avisynth", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-dav1d", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-zimg", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-kvazaar", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-libxavs", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-libsrt", action="store_true", help="Normally installed on full install")
     parser.add_argument("--rebuild-all", action="store_true", help="Recompile all libraries")
-    parser.add_argument("--safe", action="store_true", help="disable overwrite of existing scripts")
+    parser.add_argument("--safe", action="store_true", help="disable overwrite of existing or old scripts")
     return parser.parse_args()
 
 
@@ -188,10 +181,10 @@ def cmd(command, cwd=here, env=None, demote=True, **kwargs):
     preexec_fn = None
     if demote:
         pw_record = pwd.getpwnam(run_as)
-        environ['HOME'] = pw_record.pw_dir
-        environ['LOGNAME'] = pw_record.pw_name
-        environ['PWD'] = cwd
-        environ['USER'] = pw_record.pw_name
+        environ["HOME"] = pw_record.pw_dir
+        environ["LOGNAME"] = pw_record.pw_name
+        environ["PWD"] = cwd
+        environ["USER"] = pw_record.pw_name
 
         def preexec_fn_demote_wrapper(uid, gid):
             def demote_to_user():
@@ -203,11 +196,12 @@ def cmd(command, cwd=here, env=None, demote=True, **kwargs):
         preexec_fn = preexec_fn_demote_wrapper(pw_record.pw_uid, pw_record.pw_gid)
 
     log.debug(f'Executing from "{cwd}" as user "{"root" if not demote else run_as }" command: {command} ')
-    process = Popen(command, shell=True, cwd=cwd, stdout=PIPE, stderr=STDOUT, env=environ,
-                    preexec_fn=preexec_fn, **kwargs)
+    process = Popen(
+        command, shell=True, cwd=cwd, stdout=PIPE, stderr=STDOUT, env=environ, preexec_fn=preexec_fn, **kwargs
+    )
     while True:
         output = process.stdout.readline().decode("utf-8").strip()
-        if output == '' and process.poll() is not None:
+        if output == "" and process.poll() is not None:
             break
         command_log.log(CMD_LVL, output)
     return_code = process.poll()
@@ -219,7 +213,7 @@ def apt(command, cwd=here):
     try:
         return cmd(command, cwd, demote=False)
     except CalledProcessError:
-        cmd("apt update --fix-missing")
+        cmd("apt update --fix-missing", demote=False)
         return cmd(command, cwd, demote=False)
 
 
@@ -253,6 +247,13 @@ def raspberry_proc_info(cores_only=False):
         # Raspberry Pi Zero
         log.info("Using architecture 'armv6'")
         return "--arch=armv6"
+    if "aarch64" in results:
+        # Using new raspberry pi 64 bit OS
+        log.info("Using architecture 'aarch64'")
+        raise Exception("This may break with the current Raspberry Pi 64 bit build as of 07/2020. "
+                        "Only remove this line of code and uncomment next one "
+                        "if you are prepared to reinstall the OS if it doesn't work. (Please report if it works)")
+        # return "--arch=aarch64"
     log.info("Defaulting to architecture 'armel'")
     return "--arch=armel"
 
@@ -261,11 +262,12 @@ def camera_info(device, hide_error=False):
     # ffmpeg -hide_banner -f video4linux2 -list_formats all -i /dev/video0
     # [video4linux2,v4l2 @ 0xf0cf70] Raw       :     yuyv422 :           YUYV 4:2:2 : {32-2592, 2}x{32-1944, 2}
     # [video4linux2,v4l2 @ 0xf0cf70] Compressed:       mjpeg :            JFIF JPEG : {32-2592, 2}x{32-1944, 2}
-    # [video4linux2,v4l2 @ 0xf0cf70] Compressed:        h264 :                H.264 : {32-2592, 2}x{32-1944, 2}
+
     # [video4linux2,v4l2 @ 0xf0cf70] Compressed:       mjpeg :          Motion-JPEG : {32-2592, 2}x{32-1944, 2}
-    data = run(f"ffmpeg -hide_banner -f video4linux2 -list_formats all -i {device}", shell=True, stdout=PIPE,
-               stderr=PIPE)
-    stdout, stderr = data.stdout.decode('utf-8'), data.stderr.decode('utf-8')
+    data = run(
+        f"ffmpeg -hide_banner -f video4linux2 -list_formats all -i {device}", shell=True, stdout=PIPE, stderr=PIPE
+    )
+    stdout, stderr = data.stdout.decode("utf-8"), data.stderr.decode("utf-8")
     if "Not a video capture device" in stdout or "Not a video capture device" in stderr:
         if not hide_error:
             log.error(f"{device} is not a video capture device ")
@@ -273,10 +275,11 @@ def camera_info(device, hide_error=False):
 
     def get_best_resolution(res):
         if "{" in res:
+            # [video4linux2,v4l2 @ 0xf0cf70] Compressed:        h264 :                H.264 : {32-2592, 2}x{32-1944, 2}
             try:
                 w, h = res.split("x")
-                w = w[w.index("-") + 1:w.index(",")]
-                h = h[h.index("-") + 1:h.index(",")]
+                w = w[w.index("-") + 1 : w.index(",")]
+                h = h[h.index("-") + 1 : h.index(",")]
                 return f"{w}x{h}"
             except Exception:
                 log.exception(f"Couldn't figure out resolution from: {res}")
@@ -308,21 +311,26 @@ def camera_info(device, hide_error=False):
 
 def find_best_device():
     current_best = ("", {})
-    for device in Path("/dev/").glob("video*"):
+    for device in Path("/dev/").glob("video?"):
         options = camera_info(device, hide_error=True)
         if not options:
             continue
-        if 'h264' in options:
+        if "h264" in options:
             current_best = (device, options)
-        elif 'h264' not in current_best[1]:
+        elif "h264" not in current_best[1]:
             current_best = (device, options)
     if not current_best[0]:
         return "/dev/video0", "h264", "1920x1080"  # Assume user will connect pi camera
-    for fmt in ('h264', 'mjpeg', 'yuyv422', 'yuv420p'):
+    for fmt in ("h264", "mjpeg", "yuyv422", "yuv420p"):
         if fmt in current_best[1]:
             return current_best[0], fmt, current_best[1][fmt]
     fmt, res = list(current_best[1].items())[0]
     return current_best[0], fmt, res
+
+
+def all_cameras():
+    for device in Path("/dev/").glob("video?"):
+        print(f"{device} {camera_info(device, hide_error=True)}")
 
 
 def install_nginx():
@@ -331,26 +339,27 @@ def install_nginx():
 
 
 def install_ffmpeg():
+    if shutil.which("ffmpeg"):
+        log.info("ffmpeg already installed, skipping")
+        return
     log.info("Installing FFmpeg")
     apt("apt install -y ffmpeg")
 
 
-def compile_ffmpeg(extra_libs, install_type):
+def compile_ffmpeg(extra_libs, minimal_install=False):
     ffmpeg_configures, apt_installs = [], []
-    possible_installs = {0: minimal_ffmpeg_config, 1: standard_ffmpeg_config, 2: all_ffmpeg_config}
-    if install_type not in possible_installs:
-        raise Exception(f"Unexpected install type {install_type}")
 
-    for f, a in possible_installs[install_type]:
+    for f, a in (all_ffmpeg_config if not minimal_install else minimal_install):
         ffmpeg_configures.append(f)
         apt_installs.append(a)
 
     ffmpeg_libs = "{}".format(" ".join(ffmpeg_configures))
+    processor_info = raspberry_proc_info()  # Needs to be here to proper error before the apt install
 
     log.info("Installing FFmpeg requirements")
     apt("apt install -y git checkinstall build-essential {}".format(" ".join(apt_installs)))
 
-    ffmpeg_dir = (here / "FFmpeg")
+    ffmpeg_dir = here / "FFmpeg"
     if not ffmpeg_dir.exists():
         log.info("Grabbing FFmpeg")
         cmd("git clone https://github.com/FFmpeg/FFmpeg.git FFmpeg --depth 1", cwd=here)
@@ -360,11 +369,11 @@ def compile_ffmpeg(extra_libs, install_type):
 
     log.info("Configuring FFmpeg")
     cmd(
-        f"./configure {raspberry_proc_info()} --target-os=linux "
+        f"./configure {processor_info} --target-os=linux "
         '--extra-libs="-lpthread -lm" '
         "--enable-static --disable-shared --disable-debug --enable-gpl --enable-version3 --enable-nonfree  "
         f"{ffmpeg_libs} {extra_libs}",
-        cwd=ffmpeg_dir
+        cwd=ffmpeg_dir,
     )
 
     log.info("Building FFmpeg (This will take a while)")
@@ -410,6 +419,7 @@ def install_avisynth():
         return "--enable-avisynth"
 
     log.info("Building AviSynth headers")
+    apt("apt install -y cmake")
     lib_dir = ensure_library_dir()
     sub_dir = lib_dir / "AviSynthPlus"
     if sub_dir.exists():
@@ -578,8 +588,8 @@ def update_rc_local_file(on_reboot_file):
 def install_index_file(index_file, video_size):
     width, height = video_size.split("x")
     width, height = int(width), int(height)
-    if width > 1600:
-        width = 1600
+    if width > 1200:
+        width = 1200
 
     index_contents = f"""<!DOCTYPE html>
 <html lang="en">
@@ -587,48 +597,19 @@ def install_index_file(index_file, video_size):
     <meta charset="UTF-8">
     <title>Raspberry Pi Camera</title>
     <style>
-        html body .page {{
-            height: 100%;
-            width: 100%;
-        }}
-
-        video {{
-            width: {width}px;
-        }}
-
-        .wrapper {{
-            width: {width}px;
-            margin: auto;
-        }}
+        html body .page {{ height: 100%; width: 100%; }}
+        video {{ width: {width}px; }}
+        .wrapper {{ width: {width}px; margin: auto; }}
     </style>
 </head>
 <body>
 <div class="page">
     <div class="wrapper">
-        <h1> Raspberry Pi Camera</h1>
-        <video data-dashjs-player autoplay controls type="application/dash+xml"></video>
+        <h1>Raspberry Pi Camera</h1>
+        <video data-dashjs-player autoplay controls src="manifest.mpd" type="application/dash+xml"></video>
     </div>
 </div>
-<script src="https://cdn.dashjs.org/latest/dash.all.min.js" type="text/javascript"></script>
-<script type="text/javascript">
-
-    function init() {{
-	    const url = "manifest.mpd";
-        const video = document.querySelector("video");
-        const player = dashjs.MediaPlayer().create();
-        player.initialize(video, url, true);
-        player.updateSettings({{
-            'streaming': {{
-                'lowLatencyEnabled': true,
-                'liveDelay': 0,
-                'liveCatchUpMinDrift': 0.1,
-                'liveCatchUpPlaybackRate': 0.5
-            }}
-        }});
-    }}
-
-    window.onload = init;
-</script>
+<script src="http://cdn.dashjs.org/latest/dash.all.debug.js" ></script>
 </body>
 </html>
 """
@@ -645,10 +626,10 @@ def install_on_reboot_file(on_reboot_file, index_file):
     on_reboot_contents = f"""mkdir -p /dev/shm/streaming
 if [ ! -e /var/www/html/streaming ]; then
     ln -s  /dev/shm/streaming /var/www/html/streaming
-fi 
+fi
 if [ ! -e /var/www/html/streaming/index.html ]; then
     ln -s {index_file} /var/www/html/streaming/index.html
-fi 
+fi
 """
     if on_reboot_file.exists():
         if disable_overwrite:
@@ -659,20 +640,24 @@ fi
     on_reboot_file.chmod(0o755)
 
 
-def install_systemd_file(systemd_file, input_format, video_size, video_device):
-    ffmpeg_command = ("ffmpeg -nostdin -hide_banner -loglevel error "
-                      f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
-                      "-c:v copy -seg_duration 0.2 -remove_at_exit 1 -window_size 10 -f dash -hls_playlist 1 "
-                      "/dev/shm/streaming/manifest.mpd")
-    systemd_contents = f"""# /etc/systemd/system/encode_webcam.service
+def install_systemd_file(systemd_file, input_format, video_size, video_device, codec, ffmpeg_params):
+    ffmpeg_command = (
+        "ffmpeg -nostdin -hide_banner -loglevel error "
+        f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
+        f"-c:v {codec} {ffmpeg_params if ffmpeg_params else ''} "
+        "-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 -hls_playlist 1 "
+        "/dev/shm/streaming/manifest.mpd"
+    )
+    systemd_contents = f"""# {systemd_file}
 [Unit]
-Description=encode_webcam
+Description=Camera Streaming Service
 After=network.target rc-local.service
 
 [Service]
 Restart=always
 RestartSec=20s
 ExecStart={ffmpeg_command}
+
 [Install]
 WantedBy=multi-user.target
 """
@@ -688,11 +673,11 @@ WantedBy=multi-user.target
     log.info(f"Systemd file created at {systemd_file}.")
 
 
-def start_services(on_reboot_file):
+def start_services(on_reboot_file, systemd_file):
     cmd(f"/bin/bash {on_reboot_file}", demote=False)
     cmd("systemctl daemon-reload", demote=False)
-    cmd("systemctl start encode_webcam", demote=False)
-    cmd("systemctl enable encode_webcam", demote=False)
+    cmd(f"systemctl start {systemd_file.stem}", demote=False)
+    cmd(f"systemctl enable {systemd_file.stem}", demote=False)
 
 
 def show_services():
@@ -713,7 +698,11 @@ def main():
         log.critical("This script requires root / sudo privileges")
         sys.exit(1)
 
-    if args.run_as != 'root':
+    if args.camera_info:
+        all_cameras()
+        sys.exit(0)
+
+    if args.run_as != "root":
         run_as = args.run_as
         try:
             pwd.getpwnam(run_as)
@@ -721,6 +710,8 @@ def main():
             log.critical(f"Cannot run as {run_as} as that user does not exist!")
             sys.exit(1)
 
+    log.info(f"Starting streaming_setup {__version__}")
+    log.debug(f"Using arguments: {vars(args)}")
     index_file = Path(args.index_file)
     on_reboot_file = Path(args.on_reboot_file)
     systemd_file = Path(args.systemd_file)
@@ -735,33 +726,28 @@ def main():
     if args.compile_ffmpeg:
         if args.rebuild_all:
             rebuild_all = True
-        its = ("min", "standard", "all")
-        install_type = its.index(args.install_type.lower())
-        if install_type < 0:
-            raise Exception("Incorrect FFmpeg compile type selected")
 
-        log.info(f"Performing '{its[install_type]}' FFmpeg compile")
+        log.info(f"Performing \"{'minimal' if args.minimal else 'full'}\" FFmpeg compile")
         apt("apt install -y git build-essential")
         extra_libs = []
-        if install_type >= 1 and not args.disable_fdk_aac:
-            extra_libs.append(install_fdk_aac())
-        if install_type >= 1 and not args.disable_avisynth:
-            extra_libs.append(install_avisynth())
-        if install_type >= 2 and not args.disable_zimg:
-            extra_libs.append(install_zimg())
-        if install_type >= 2 and not args.disable_dav1d:
-            extra_libs.append(install_dav1d())
-        if install_type >= 2 and not args.disable_kvazaar:
-            extra_libs.append(install_kvazaar())
-        if install_type >= 2 and not args.disable_libxavs:
-            extra_libs.append(install_libxavs())
-        if install_type >= 2 and not args.disable_libsrt:
-            extra_libs.append(install_srt())
-
-        cmd("ldconfig", demote=False)
+        if not args.minimal:
+            if not args.disable_fdk_aac:
+                extra_libs.append(install_fdk_aac())
+            if not args.disable_avisynth:
+                extra_libs.append(install_avisynth())
+            if not args.disable_zimg:
+                extra_libs.append(install_zimg())
+            if not args.disable_dav1d:
+                extra_libs.append(install_dav1d())
+            if not args.disable_kvazaar:
+                extra_libs.append(install_kvazaar())
+            if not args.disable_libxavs:
+                extra_libs.append(install_libxavs())
+            if not args.disable_libsrt:
+                extra_libs.append(install_srt())
+            cmd("ldconfig", demote=False)
         compile_ffmpeg(
-            extra_libs=" ".join(extra_libs),
-            install_type=install_type,
+            extra_libs=" ".join(extra_libs), minimal_install=args.minimal,
         )
     else:
         install_ffmpeg()
@@ -770,9 +756,14 @@ def main():
     install_index_file(index_file=index_file, video_size=args.video_size)
     install_on_reboot_file(on_reboot_file=on_reboot_file, index_file=index_file)
     install_systemd_file(
-        systemd_file=systemd_file, input_format=args.input_format, video_size=args.video_size, video_device=args.device,
+        systemd_file=systemd_file,
+        input_format=args.input_format,
+        video_size=args.video_size,
+        video_device=args.device,
+        codec=args.codec,
+        ffmpeg_params=args.ffmpeg_params,
     )
-    start_services(on_reboot_file=on_reboot_file)
+    start_services(on_reboot_file=on_reboot_file, systemd_file=systemd_file)
     log.info("Install complete!")
     show_services()
 
