@@ -24,12 +24,13 @@ import sys
 import shutil
 import pwd
 import datetime
+import json
 from subprocess import run, CalledProcessError, PIPE, STDOUT, Popen
 from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -140,6 +141,9 @@ def parse_arguments():
     parser.add_argument(
         "-s", "--video-size", default=resolution, help=f"The video resolution from the camera (using {resolution})"
     )
+    parser.add_argument("-r", "--rtsp", action="store_true", help="Use RTSP instead of DASH / HLS")
+    parser.add_argument("--rtsp-url", default="",
+                        help="Provide a remote RTSP url to connect to and don't set up a local server")
     parser.add_argument("-f", "--input-format", default=fmt, help=f"The format the camera supports (using {fmt})")
     parser.add_argument("-c", "--codec", default=codec, help=f"Conversion codec (using '{codec}')")
     parser.add_argument(
@@ -215,6 +219,11 @@ def apt(command, cwd=here):
     except CalledProcessError:
         cmd("apt update --fix-missing", demote=False)
         return cmd(command, cwd, demote=False)
+
+
+def lscpu_output():
+    results = json.loads(run("lscpu -J", shell=True, stdout=PIPE).stdout.decode("utf-8").lower())
+    return {x["field"]: x["data"] for x in results["lscpu"]}
 
 
 def raspberry_proc_info(cores_only=False):
@@ -638,15 +647,16 @@ fi
         log.warning(f"On reboot file exists at {on_reboot_file}, overwriting")
     on_reboot_file.write_text(on_reboot_contents)
     on_reboot_file.chmod(0o755)
+    cmd(f"/bin/bash {on_reboot_file}", demote=False)
 
 
-def install_systemd_file(systemd_file, input_format, video_size, video_device, codec, ffmpeg_params):
+def install_ffmpeg_systemd_file(systemd_file, input_format, video_size, video_device, codec, ffmpeg_params, fmt, path="/dev/shm/streaming/manifest.mpd"):
     ffmpeg_command = (
         "ffmpeg -nostdin -hide_banner -loglevel error "
         f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
         f"-c:v {codec} {ffmpeg_params if ffmpeg_params else ''} "
-        "-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 -hls_playlist 1 "
-        "/dev/shm/streaming/manifest.mpd"
+        "-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 -hls_playlist 1" if fmt == "dash" else "-f rtsp"
+        f"{path}"
     )
     systemd_contents = f"""# {systemd_file}
 [Unit]
@@ -671,13 +681,66 @@ WantedBy=multi-user.target
     systemd_file.write_text(systemd_contents)
     systemd_file.chmod(0o755)
     log.info(f"Systemd file created at {systemd_file}.")
-
-
-def start_services(on_reboot_file, systemd_file):
-    cmd(f"/bin/bash {on_reboot_file}", demote=False)
     cmd("systemctl daemon-reload", demote=False)
     cmd(f"systemctl start {systemd_file.stem}", demote=False)
     cmd(f"systemctl enable {systemd_file.stem}", demote=False)
+
+
+def install_rtsp_systemd(rtsp_systemd_file):
+    contents = """# /etc/systemd/system/rtsp_server.service
+
+[Unit]
+Description=rtsp_server
+After=network.target rc-local.service
+
+[Service]
+Restart=always
+WorkingDirectory=/var/lib/streaming/
+ExecStart=./rtsp-simple-server
+
+[Install]
+WantedBy=multi-user.target
+"""
+    if rtsp_systemd_file.exists():
+        if disable_overwrite:
+            log.info(f"File {rtsp_systemd_file} already exists. Not overwriting with: \n{rtsp_systemd_file}")
+            return
+        log.warning(f"Systemd file exists at {rtsp_systemd_file}, overwriting")
+    rtsp_systemd_file.write_text(contents)
+    rtsp_systemd_file.chmod(0o755)
+    log.info(f"rtsp server systemd file created at {rtsp_systemd_file}.")
+    cmd("systemctl daemon-reload", demote=False)
+    cmd(f"systemctl start {rtsp_systemd_file.stem}", demote=False)
+    cmd(f"systemctl enable {rtsp_systemd_file.stem}", demote=False)
+
+def install_rtsp():
+    from urllib.request import urlopen
+    import shutil
+    import tarfile
+    rtsp_releases = json.dumps(urlopen(f"https://api.github.com/repos/aler9/rtsp-simple-server/releases").read().decode('utf-8'))
+    rtsp_assets = json.dumps(urlopen(rtsp_releases[0]["assets_url"]).read().decode('utf-8'))
+    lscpu = lscpu_output()
+    mappings = {
+        "armv7l": "arm7",
+        "armv6l": "arm6",
+        "aarch64": "arm64"
+    }
+    if lscpu["architecture"] not in mappings:
+        raise Exception(f"Don't know the arch {lscpu['architecture']}")
+
+    arch = mappings[lscpu["architecture"]]
+
+    sd = Path("/var/lib/streaming/")
+
+    for asset in rtsp_assets:
+        if arch in asset["name"]:
+            with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], 'wb') as out_file:
+                shutil.copyfileobj(response, out_file)
+            with tarfile.open(sd / asset["name"]) as tf:
+                tf.extractall(path=sd)
+            break
+    else:
+        raise Exception("Could not find download for rtsp server")
 
 
 def show_services():
@@ -721,8 +784,6 @@ def main():
     if args.safe:
         disable_overwrite = True
 
-    install_nginx()
-
     if args.compile_ffmpeg:
         if args.rebuild_all:
             rebuild_all = True
@@ -752,18 +813,31 @@ def main():
     else:
         install_ffmpeg()
 
-    update_rc_local_file(on_reboot_file=on_reboot_file)
-    install_index_file(index_file=index_file, video_size=args.video_size)
-    install_on_reboot_file(on_reboot_file=on_reboot_file, index_file=index_file)
-    install_systemd_file(
+    rtsp_path = "rtsp://localhost:8554/streaming"
+    if args.rtsp:
+        if not args.rtsp_path:
+            install_rtsp()
+            install_rtsp_systemd(Path("/etc/systemd/system/rtsp_server.service"))
+        else:
+            rtsp_path = args.rtsp_path
+
+    else:
+        install_nginx()
+        update_rc_local_file(on_reboot_file=on_reboot_file)
+        install_index_file(index_file=index_file, video_size=args.video_size)
+        install_on_reboot_file(on_reboot_file=on_reboot_file, index_file=index_file)
+
+    install_ffmpeg_systemd_file(
         systemd_file=systemd_file,
         input_format=args.input_format,
         video_size=args.video_size,
         video_device=args.device,
         codec=args.codec,
         ffmpeg_params=args.ffmpeg_params,
+        fmt="rtsp" if args.rtsp else "dash",
+        path="/dev/shm/streaming/manifest.mpd" if not args.rtsp else rtsp_path
     )
-    start_services(on_reboot_file=on_reboot_file, systemd_file=systemd_file)
+
     log.info("Install complete!")
     show_services()
 
