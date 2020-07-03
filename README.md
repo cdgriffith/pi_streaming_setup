@@ -5,10 +5,10 @@ compatible video4linux2 camera into a MPEG-DASH / HLS streaming server.
 
 The steps it will attempt to take:
 
-* Install nginx
-* Install FFmpeg OR (optional) Compile and Install FFmpeg with h264 hardware acceleration
-* Update rc.local to run required setup script on reboot
-* Create index.html file to view video stream at
+* Install FFmpeg OR (optional) Compile and Install FFmpeg ( with h264 hardware acceleration and nonfree libraries)
+* Install nginx for DASH / HLS OR install RTSP server if desired
+* (DASH/HLS) Update rc.local to run required setup script on reboot
+* (DASH/HLS) Create index.html file to view video stream at
 * Create systemd service and enable it
 
 If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
@@ -16,18 +16,40 @@ If you will be compiling while running over SSH, please use in a background term
 If you are compilng FFmpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
 You will not be able to share the built binaries under any license.
 
-To use the standard FFmpeg, just need to run the script as root / sudo then you're good to go:
+## MPEG DASH / HLS 
+
+DASH is a great way to use your device as standalone streaming server with a easy to view webpage hosted on the Pi. 
+The disadvantage is the delay due to buffering and the way DASH / HLS work with manifest files. You will have a 5~20
+second lag from the camera to when you view it. 
+
+To use the pre-built FFmpeg and MPEG DASH, just need to run the script as root / sudo then you're good to go:
 
 ```
 sudo python3 streaming_setup.py
 ```
 
+## RTSP 
+
+If you want near instant real time streaming, it's best to use the aptly named Real Time Streaming Protocol, RTSP.
+
+``` 
+sudo python3 streaming_setup.py --rtsp
+```
+
+If you are connecting to an external RTSP server, pass in the `rtsp-url` argument.
+
+```
+sudo python3 streaming_setup.py --rtsp --rtsp-url rtsp://192.168.1.123:8554/raspberrypi
+```
+
+## Compile FFmpeg
 If you want to compile FFmpeg make sure to pass the `--compile-ffmpeg` flag
 and I suggest setting the user to `pi` if making in your home directory. 
 
 ```
 sudo python3 streaming_setup.py --compile-ffmpeg --run-as pi
 ```
+
 
 
 
