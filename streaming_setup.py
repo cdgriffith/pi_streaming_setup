@@ -861,12 +861,13 @@ def main():
     if args.rtsp and not args.rtsp_url:
         install_rtsp()
         install_rtsp_systemd(Path("/etc/systemd/system/rtsp_server.service"))
-    else:
+    elif not args.rtsp:
         install_nginx()
         update_rc_local_file(on_reboot_file=on_reboot_file)
         install_index_file(index_file=index_file, video_size=args.video_size)
         install_on_reboot_file(on_reboot_file=on_reboot_file, index_file=index_file)
         show_services()
+
     install_ffmpeg_systemd_file(systemd_file=systemd_file, ffmpeg_command=ffmpeg_cmd)
 
     log.info("Install complete!")
