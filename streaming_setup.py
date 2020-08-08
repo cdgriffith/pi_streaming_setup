@@ -24,12 +24,13 @@ import sys
 import shutil
 import pwd
 import datetime
+import json
 from subprocess import run, CalledProcessError, PIPE, STDOUT, Popen
 from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -136,10 +137,14 @@ def parse_arguments():
 
     parser = ArgumentParser(prog="streaming_setup", description=f"streaming_setup version {__version__}")
     parser.add_argument("-v", "--version", action="store_true")
+    parser.add_argument("--ffmpeg-command", action="store_true", help="print the automated FFmpeg command and exit")
     parser.add_argument("-d", "-i", "--device", default=str(device), help=f"Camera. Selected: {device}")
     parser.add_argument(
         "-s", "--video-size", default=resolution, help=f"The video resolution from the camera (using {resolution})"
     )
+    parser.add_argument("-r", "--rtsp", action="store_true", help="Use RTSP instead of DASH / HLS")
+    parser.add_argument("--rtsp-url", default="",
+                        help="Provide a remote RTSP url to connect to and don't set up a local server")
     parser.add_argument("-f", "--input-format", default=fmt, help=f"The format the camera supports (using {fmt})")
     parser.add_argument("-c", "--codec", default=codec, help=f"Conversion codec (using '{codec}')")
     parser.add_argument(
@@ -217,24 +222,25 @@ def apt(command, cwd=here):
         return cmd(command, cwd, demote=False)
 
 
+def lscpu_output():
+    results = json.loads(run("lscpu -J", shell=True, stdout=PIPE).stdout.decode("utf-8").lower())
+    return {x["field"]: x["data"] for x in results["lscpu"]}
+
+
 def raspberry_proc_info(cores_only=False):
-    results = run("lscpu", stdout=PIPE).stdout.decode("utf-8").lower()
+    results = lscpu_output()
     if cores_only:
-        for line in results.splitlines():
-            if line.startswith("cpu(s):"):
-                return int(line.split()[1].strip())
-        else:
-            return 1
+        return int(results.get('cpu(s)', 1))
     log.info(f"Model Info: {Path('/proc/device-tree/model').read_text()}")
-    if "armv7" in results:
-        if "cortex-a72" in results:
+    if "armv7" in results['architecture']:
+        if "cortex-a72" in results['model name']:
             # Raspberry Pi 4 Model B
             log.info("Optimizing for cortex-a72 processor")
             return (
                 "--arch=armv7 --cpu=cortex-a72 --enable-neon "
                 "--extra-cflags='-mtune=cortex-a72 -mfpu=neon-vfpv4 -mfloat-abi=hard'"
             )
-        if "cortex-a53" in results:
+        if "cortex-a53" in results['model name']:
             # Raspberry Pi 3 Model B
             log.info("Optimizing for cortex-a53 processor")
             return (
@@ -243,19 +249,19 @@ def raspberry_proc_info(cores_only=False):
             )
         log.info("Using architecture 'armv7'")
         return "--arch=armv7"
-    if "armv6" in results:
+    if "armv6" in results['architecture']:
         # Raspberry Pi Zero
         log.info("Using architecture 'armv6'")
         return "--arch=armv6"
-    if "aarch64" in results:
+    if "aarch64" in results['architecture']:
         # Using new raspberry pi 64 bit OS
         log.info("Using architecture 'aarch64'")
         raise Exception("This may break with the current Raspberry Pi 64 bit build as of 07/2020. "
                         "Only remove this line of code and uncomment next one "
                         "if you are prepared to reinstall the OS if it doesn't work. (Please report if it works)")
         # return "--arch=aarch64"
-    log.info("Defaulting to architecture 'armel'")
-    return "--arch=armel"
+    log.info("Defaulting to architecture 'armhf'")
+    return "--arch=armhf"
 
 
 def camera_info(device, hide_error=False):
@@ -280,7 +286,7 @@ def camera_info(device, hide_error=False):
                 w, h = res.split("x")
                 w = w[w.index("-") + 1 : w.index(",")]
                 h = h[h.index("-") + 1 : h.index(",")]
-                return f"{w}x{h}"
+                return f"{w}x{h}" if int(w) < 2000 else "1920x1080"
             except Exception:
                 log.exception(f"Couldn't figure out resolution from: {res}")
         else:
@@ -293,7 +299,7 @@ def camera_info(device, hide_error=False):
                         bw, bh = w, h
                 except Exception:
                     log.exception(f"Couldn't figure out resolution from: {option}")
-            return f"{bw}x{bh}"
+            return f"{bw}x{bh}" if int(bw) < 2000 and bw else "1920x1080"
 
     supported_formats = {}
     for line in stderr.splitlines():
@@ -638,16 +644,45 @@ fi
         log.warning(f"On reboot file exists at {on_reboot_file}, overwriting")
     on_reboot_file.write_text(on_reboot_contents)
     on_reboot_file.chmod(0o755)
+    cmd(f"/bin/bash {on_reboot_file}", demote=False)
 
 
-def install_systemd_file(systemd_file, input_format, video_size, video_device, codec, ffmpeg_params):
-    ffmpeg_command = (
+def prepare_ffmpeg_command(input_format,
+                           video_size,
+                           video_device,
+                           codec,
+                           ffmpeg_params,
+                           fmt,
+                           disable_hls=False,
+                           path=None):
+    default_paths = {'dash': "/dev/shm/streaming/manifest.mpd",
+                     "rtsp": "rtsp://localhost:8554/streaming"}
+    if not path:
+        path = default_paths[fmt]
+
+    if codec != "copy":
+        if "-b" not in ffmpeg_params:
+            x, y = video_size.split("x")
+            bitrate = (int(x) * int(y) * 2) // 1024
+            ffmpeg_params += f" -b:v {bitrate}k"
+
+    if fmt == "dash":
+        out = ("-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 "
+              f"{'' if disable_hls else '-hls_playlist 1 '}{path}")
+    elif fmt == "rtsp":
+        out = f"-f rtsp {path}"
+    else:
+        raise Exception("Only support dash and rstp output currently")
+
+    return (
         "ffmpeg -nostdin -hide_banner -loglevel error "
         f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
-        f"-c:v {codec} {ffmpeg_params if ffmpeg_params else ''} "
-        "-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 -hls_playlist 1 "
-        "/dev/shm/streaming/manifest.mpd"
-    )
+        f"-c:v {codec} {ffmpeg_params if ffmpeg_params else ''} {out}"
+    ).replace("  ", " ")
+
+
+
+def install_ffmpeg_systemd_file(systemd_file, ffmpeg_command):
     systemd_contents = f"""# {systemd_file}
 [Unit]
 Description=Camera Streaming Service
@@ -671,13 +706,66 @@ WantedBy=multi-user.target
     systemd_file.write_text(systemd_contents)
     systemd_file.chmod(0o755)
     log.info(f"Systemd file created at {systemd_file}.")
-
-
-def start_services(on_reboot_file, systemd_file):
-    cmd(f"/bin/bash {on_reboot_file}", demote=False)
     cmd("systemctl daemon-reload", demote=False)
     cmd(f"systemctl start {systemd_file.stem}", demote=False)
     cmd(f"systemctl enable {systemd_file.stem}", demote=False)
+
+
+def install_rtsp_systemd(rtsp_systemd_file):
+    contents = """# /etc/systemd/system/rtsp_server.service
+
+[Unit]
+Description=rtsp_server
+After=network.target rc-local.service
+
+[Service]
+Restart=always
+WorkingDirectory=/var/lib/streaming/
+ExecStart=./rtsp-simple-server
+
+[Install]
+WantedBy=multi-user.target
+"""
+    if rtsp_systemd_file.exists():
+        if disable_overwrite:
+            log.info(f"File {rtsp_systemd_file} already exists. Not overwriting with: \n{rtsp_systemd_file}")
+            return
+        log.warning(f"Systemd file exists at {rtsp_systemd_file}, overwriting")
+    rtsp_systemd_file.write_text(contents)
+    rtsp_systemd_file.chmod(0o755)
+    log.info(f"rtsp server systemd file created at {rtsp_systemd_file}.")
+    cmd("systemctl daemon-reload", demote=False)
+    cmd(f"systemctl start {rtsp_systemd_file.stem}", demote=False)
+    cmd(f"systemctl enable {rtsp_systemd_file.stem}", demote=False)
+
+def install_rtsp():
+    from urllib.request import urlopen
+    import shutil
+    import tarfile
+    rtsp_releases = json.dumps(urlopen(f"https://api.github.com/repos/aler9/rtsp-simple-server/releases").read().decode('utf-8'))
+    rtsp_assets = json.dumps(urlopen(rtsp_releases[0]["assets_url"]).read().decode('utf-8'))
+    lscpu = lscpu_output()
+    mappings = {
+        "armv7l": "arm7",
+        "armv6l": "arm6",
+        "aarch64": "arm64"
+    }
+    if lscpu["architecture"] not in mappings:
+        raise Exception(f"Don't know the arch {lscpu['architecture']}")
+
+    arch = mappings[lscpu["architecture"]]
+
+    sd = Path("/var/lib/streaming/")
+
+    for asset in rtsp_assets:
+        if arch in asset["name"]:
+            with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], 'wb') as out_file:
+                shutil.copyfileobj(response, out_file)
+            with tarfile.open(sd / asset["name"]) as tf:
+                tf.extractall(path=sd)
+            break
+    else:
+        raise Exception("Could not find download for rtsp server")
 
 
 def show_services():
@@ -702,6 +790,24 @@ def main():
         all_cameras()
         sys.exit(0)
 
+    output_path = None
+    if args.rtsp and args.rtsp_url:
+        output_path = args.rtsp_url
+
+    ffmpeg_cmd = prepare_ffmpeg_command(
+        input_format=args.input_format,
+        video_size=args.video_size,
+        video_device=args.device,
+        codec=args.codec,
+        ffmpeg_params=args.ffmpeg_params,
+        fmt="rtsp" if args.rtsp else "dash",
+        path=output_path
+    )
+
+    if args.ffmpeg_command:
+        print(ffmpeg_cmd)
+        sys.exit()
+
     if args.run_as != "root":
         run_as = args.run_as
         try:
@@ -716,12 +822,12 @@ def main():
     on_reboot_file = Path(args.on_reboot_file)
     systemd_file = Path(args.systemd_file)
 
-    index_file.parent.mkdir(parents=True, exist_ok=True)
-    on_reboot_file.parent.mkdir(parents=True, exist_ok=True)
+    if not args.rtsp:
+        index_file.parent.mkdir(parents=True, exist_ok=True)
+        on_reboot_file.parent.mkdir(parents=True, exist_ok=True)
+
     if args.safe:
         disable_overwrite = True
-
-    install_nginx()
 
     if args.compile_ffmpeg:
         if args.rebuild_all:
@@ -752,20 +858,19 @@ def main():
     else:
         install_ffmpeg()
 
-    update_rc_local_file(on_reboot_file=on_reboot_file)
-    install_index_file(index_file=index_file, video_size=args.video_size)
-    install_on_reboot_file(on_reboot_file=on_reboot_file, index_file=index_file)
-    install_systemd_file(
-        systemd_file=systemd_file,
-        input_format=args.input_format,
-        video_size=args.video_size,
-        video_device=args.device,
-        codec=args.codec,
-        ffmpeg_params=args.ffmpeg_params,
-    )
-    start_services(on_reboot_file=on_reboot_file, systemd_file=systemd_file)
+    if args.rtsp and not args.rtsp_url:
+        install_rtsp()
+        install_rtsp_systemd(Path("/etc/systemd/system/rtsp_server.service"))
+    elif not args.rtsp:
+        install_nginx()
+        update_rc_local_file(on_reboot_file=on_reboot_file)
+        install_index_file(index_file=index_file, video_size=args.video_size)
+        install_on_reboot_file(on_reboot_file=on_reboot_file, index_file=index_file)
+        show_services()
+
+    install_ffmpeg_systemd_file(systemd_file=systemd_file, ffmpeg_command=ffmpeg_cmd)
+
     log.info("Install complete!")
-    show_services()
 
 
 if __name__ == "__main__":
