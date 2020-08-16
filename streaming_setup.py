@@ -224,7 +224,7 @@ def apt(command, cwd=here):
 
 def lscpu_output():
     results = json.loads(run("lscpu -J", shell=True, stdout=PIPE).stdout.decode("utf-8").lower())
-    return {x["field"]: x["data"] for x in results["lscpu"]}
+    return {x["field"].replace(':',''): x["data"] for x in results["lscpu"]}
 
 
 def raspberry_proc_info(cores_only=False):
@@ -721,7 +721,7 @@ After=network.target rc-local.service
 [Service]
 Restart=always
 WorkingDirectory=/var/lib/streaming/
-ExecStart=./rtsp-simple-server
+ExecStart=/var/lib/streaming/rtsp-simple-server
 
 [Install]
 WantedBy=multi-user.target
@@ -742,8 +742,8 @@ def install_rtsp():
     from urllib.request import urlopen
     import shutil
     import tarfile
-    rtsp_releases = json.dumps(urlopen(f"https://api.github.com/repos/aler9/rtsp-simple-server/releases").read().decode('utf-8'))
-    rtsp_assets = json.dumps(urlopen(rtsp_releases[0]["assets_url"]).read().decode('utf-8'))
+    rtsp_releases = json.loads(urlopen(f"https://api.github.com/repos/aler9/rtsp-simple-server/releases").read().decode('utf-8'))
+    rtsp_assets = json.loads(urlopen(rtsp_releases[0]["assets_url"]).read().decode('utf-8'))
     lscpu = lscpu_output()
     mappings = {
         "armv7l": "arm7",
@@ -756,7 +756,8 @@ def install_rtsp():
     arch = mappings[lscpu["architecture"]]
 
     sd = Path("/var/lib/streaming/")
-
+    sd.mkdir(exist_ok=True)
+        
     for asset in rtsp_assets:
         if arch in asset["name"]:
             with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], 'wb') as out_file:
