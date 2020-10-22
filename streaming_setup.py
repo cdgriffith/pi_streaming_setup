@@ -30,7 +30,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -107,7 +107,6 @@ all_ffmpeg_config = minimal_ffmpeg_config + [
     ("--enable-libssh", "libssh-dev"),
     ("--enable-libtesseract", "libtesseract-dev"),
     ("--enable-libtwolame", "libtwolame-dev"),
-    ("--enable-libwavpack", "libwavpack-dev"),
     ("--enable-libxcb", "libxcb1-dev"),
     ("--enable-libxcb-shm", "libxcb-shm0-dev"),
     ("--enable-libxcb-xfixes", "libxcb-xfixes0-dev"),
@@ -125,6 +124,7 @@ all_ffmpeg_config = minimal_ffmpeg_config + [
     ("--enable-libopencore-amrwb", "libopencore-amrwb-dev"),
     ("--enable-libopencore-amrnb", "libopencore-amrnb-dev"),
     ("--enable-libvo-amrwbenc", "libvo-amrwbenc-dev"),
+    # ("--enable-libwavpack", "libwavpack-dev"), # Option removed as of 10/22/20
     # ('--enable-libmysofa', 'libmysofa-dev'), # error: 'mysofa_neighborhood_init_withstepdefine' undeclared
     # ('--enable-libsmbclient', 'libsmbclient-dev'),  # not found, even with --extra-cflags="-I/usr/include/samba-4.0"
     # ('--enable-libiec61883', 'libiec61883-dev libiec61883-0'), # cannot find -lavc1394, cannot find -lrom1394
@@ -155,6 +155,7 @@ def parse_arguments():
     parser.add_argument("--on-reboot-file", default="/var/lib/streaming/setup_streaming.sh")
     parser.add_argument("--systemd-file", default="/etc/systemd/system/stream_camera.service")
     parser.add_argument("--compile-ffmpeg", action="store_true")
+    parser.add_argument("--compile-only", action="store_true")
     parser.add_argument(
         "--camera-info", action="store_true", help="Show all detected cameras [/dev/video(0-9)] and exit"
     )
@@ -224,7 +225,7 @@ def apt(command, cwd=here):
 
 def lscpu_output():
     results = json.loads(run("lscpu -J", shell=True, stdout=PIPE).stdout.decode("utf-8").lower())
-    return {x["field"]: x["data"] for x in results["lscpu"]}
+    return {x["field"].replace(':',''): x["data"] for x in results["lscpu"]}
 
 
 def raspberry_proc_info(cores_only=False):
@@ -232,6 +233,9 @@ def raspberry_proc_info(cores_only=False):
     if cores_only:
         return int(results.get('cpu(s)', 1))
     log.info(f"Model Info: {Path('/proc/device-tree/model').read_text()}")
+    if 'architecture' not in results:
+        log.warning(f"Could not grab architecture information from lscpu, defaulting to armhf: {results}")
+        return "--arch=armhf "
     if "armv7" in results['architecture']:
         if "cortex-a72" in results['model name']:
             # Raspberry Pi 4 Model B
@@ -248,7 +252,7 @@ def raspberry_proc_info(cores_only=False):
                 "--extra-cflags='-mtune=cortex-a53 -mfpu=neon-vfpv4 -mfloat-abi=hard'"
             )
         log.info("Using architecture 'armv7'")
-        return "--arch=armv7"
+        return "--arch=armv7 --enable-neon "
     if "armv6" in results['architecture']:
         # Raspberry Pi Zero
         log.info("Using architecture 'armv6'")
@@ -376,7 +380,7 @@ def compile_ffmpeg(extra_libs, minimal_install=False):
     log.info("Configuring FFmpeg")
     cmd(
         f"./configure {processor_info} --target-os=linux "
-        '--extra-libs="-lpthread -lm" '
+        '--extra-libs="-lpthread -lm" --extra-ldflags="-latomic" '
         "--enable-static --disable-shared --disable-debug --enable-gpl --enable-version3 --enable-nonfree  "
         f"{ffmpeg_libs} {extra_libs}",
         cwd=ffmpeg_dir,
@@ -738,12 +742,13 @@ WantedBy=multi-user.target
     cmd(f"systemctl start {rtsp_systemd_file.stem}", demote=False)
     cmd(f"systemctl enable {rtsp_systemd_file.stem}", demote=False)
 
+
 def install_rtsp():
     from urllib.request import urlopen
     import shutil
     import tarfile
-    rtsp_releases = json.dumps(urlopen(f"https://api.github.com/repos/aler9/rtsp-simple-server/releases").read().decode('utf-8'))
-    rtsp_assets = json.dumps(urlopen(rtsp_releases[0]["assets_url"]).read().decode('utf-8'))
+    rtsp_releases = json.loads(urlopen(f"https://api.github.com/repos/aler9/rtsp-simple-server/releases").read().decode('utf-8'))
+    rtsp_assets = json.loads(urlopen(rtsp_releases[0]["assets_url"]).read().decode('utf-8'))
     lscpu = lscpu_output()
     mappings = {
         "armv7l": "arm7",
@@ -829,7 +834,7 @@ def main():
     if args.safe:
         disable_overwrite = True
 
-    if args.compile_ffmpeg:
+    if args.compile_ffmpeg or args.compile_only:
         if args.rebuild_all:
             rebuild_all = True
 
@@ -857,6 +862,10 @@ def main():
         )
     else:
         install_ffmpeg()
+
+    if args.compile_only:
+        log.info("Compile complete!")
+        return
 
     if args.rtsp and not args.rtsp_url:
         install_rtsp()
