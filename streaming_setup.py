@@ -725,7 +725,7 @@ After=network.target rc-local.service
 [Service]
 Restart=always
 WorkingDirectory=/var/lib/streaming/
-ExecStart=./rtsp-simple-server
+ExecStart=/var/lib/streaming/rtsp-simple-server
 
 [Install]
 WantedBy=multi-user.target
@@ -761,7 +761,8 @@ def install_rtsp():
     arch = mappings[lscpu["architecture"]]
 
     sd = Path("/var/lib/streaming/")
-
+    sd.mkdir(exist_ok=True)
+        
     for asset in rtsp_assets:
         if arch in asset["name"]:
             with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], 'wb') as out_file:
