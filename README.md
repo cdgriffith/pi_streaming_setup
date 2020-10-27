@@ -82,7 +82,7 @@ optional arguments:
                         Conversion codec (using 'copy')
   --ffmpeg-params FFMPEG_PARAMS
                         specify additional FFmpeg params, helpful if not
-                        copying codec e.g.: '-b:v 4M -maxrate 4M -buffsize 8M'
+                        copying codec e.g.: '-b:v 4M -maxrate 4M -bufsize 8M'
   --index-file INDEX_FILE
   --on-reboot-file ON_REBOOT_FILE
   --systemd-file SYSTEMD_FILE
