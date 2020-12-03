@@ -30,7 +30,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.5.1"
+__version__ = "1.6"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -146,6 +146,7 @@ def parse_arguments():
     parser.add_argument("--rtsp-url", default="",
                         help="Provide a remote RTSP url to connect to and don't set up a local server")
     parser.add_argument("-f", "--input-format", default=fmt, help=f"The format the camera supports (using {fmt})")
+    parser.add_argument("-b", "--bitrate", default="dynamic", help=f"Streaming bitrate, is auto calculated by default")
     parser.add_argument("-c", "--codec", default=codec, help=f"Conversion codec (using '{codec}')")
     parser.add_argument(
         "--ffmpeg-params",
@@ -658,17 +659,22 @@ def prepare_ffmpeg_command(input_format,
                            ffmpeg_params,
                            fmt,
                            disable_hls=False,
-                           path=None):
+                           path=None,
+                           bitrate="dynamic"):
     default_paths = {'dash': "/dev/shm/streaming/manifest.mpd",
                      "rtsp": "rtsp://localhost:8554/streaming"}
     if not path:
         path = default_paths[fmt]
 
     if codec != "copy":
-        if "-b" not in ffmpeg_params:
+        if "-b" not in ffmpeg_params and bitrate == "dynamic":
             x, y = video_size.split("x")
             bitrate = (int(x) * int(y) * 2) // 1024
             ffmpeg_params += f" -b:v {bitrate}k"
+        else:
+            if not bitrate.lower().endswith(("m", "k", "g")):
+                bitrate += "k"
+            ffmpeg_params += f" -b:v {bitrate}"
 
     if fmt == "dash":
         out = ("-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 "
@@ -807,7 +813,8 @@ def main():
         codec=args.codec,
         ffmpeg_params=args.ffmpeg_params,
         fmt="rtsp" if args.rtsp else "dash",
-        path=output_path
+        path=output_path,
+        bitrate=args.bitrate
     )
 
     if args.ffmpeg_command:

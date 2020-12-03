@@ -16,6 +16,8 @@ If you will be compiling while running over SSH, please use in a background term
 If you are compilng FFmpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
 You will not be able to share the built binaries under any license.
 
+This script requires Python 3.6+
+
 ## MPEG DASH / HLS 
 
 DASH is a great way to use your device as standalone streaming server with a easy to view webpage hosted on the Pi. 
@@ -56,42 +58,40 @@ sudo python3 streaming_setup.py --compile-ffmpeg --run-as pi
 ## Script Options 
 
 ```
-usage: streaming_setup [-h] [-v] [-d DEVICE] [-s VIDEO_SIZE] [-f INPUT_FORMAT]
-                       [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS]
-                       [--index-file INDEX_FILE]
-                       [--on-reboot-file ON_REBOOT_FILE]
-                       [--systemd-file SYSTEMD_FILE] [--compile-ffmpeg]
-                       [--camera-info] [--minimal] [--run-as RUN_AS]
-                       [--disable-fdk-aac] [--disable_avisynth]
-                       [--disable-dav1d] [--disable-zimg] [--disable-kvazaar]
-                       [--disable-libxavs] [--disable-libsrt] [--rebuild-all]
-                       [--safe]
+usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL] [-f INPUT_FORMAT] [-b BITRATE] 
+                       [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS] [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] 
+                       [--systemd-file SYSTEMD_FILE] [--compile-ffmpeg] [--compile-only] [--camera-info]
+                       [--minimal] [--run-as RUN_AS] [--disable-fdk-aac] [--disable_avisynth] [--disable-dav1d] 
+                       [--disable-zimg] [--disable-kvazaar] [--disable-libxavs] [--disable-libsrt] [--rebuild-all] [--safe]
 
-streaming_setup version 1.4.0
+streaming_setup version 1.6
 
 optional arguments:
   -h, --help            show this help message and exit
   -v, --version
+  --ffmpeg-command      print the automated FFmpeg command and exit
   -d DEVICE, -i DEVICE, --device DEVICE
                         Camera. Selected: /dev/video0
   -s VIDEO_SIZE, --video-size VIDEO_SIZE
-                        The video resolution from the camera (using 2592x1944)
+                        The video resolution from the camera (using 1920x1080)
+  -r, --rtsp            Use RTSP instead of DASH / HLS
+  --rtsp-url RTSP_URL   Provide a remote RTSP url to connect to and don't set up a local server
   -f INPUT_FORMAT, --input-format INPUT_FORMAT
                         The format the camera supports (using h264)
+  -b BITRATE, --bitrate BITRATE
+                        Streaming bitrate, is auto calculated by default
   -c CODEC, --codec CODEC
                         Conversion codec (using 'copy')
   --ffmpeg-params FFMPEG_PARAMS
-                        specify additional FFmpeg params, helpful if not
-                        copying codec e.g.: '-b:v 4M -maxrate 4M -bufsize 8M'
+                        specify additional FFmpeg params, helpful if not copying codec e.g.: '-b:v 4M -maxrate 4M -buffsize 8M'
   --index-file INDEX_FILE
   --on-reboot-file ON_REBOOT_FILE
   --systemd-file SYSTEMD_FILE
   --compile-ffmpeg
+  --compile-only
   --camera-info         Show all detected cameras [/dev/video(0-9)] and exit
-  --minimal             Minimal FFmpeg compile including h264, x264, alsa
-                        sound and fonts
-  --run-as RUN_AS       compile programs as provided user (suggested 'pi',
-                        defaults to 'root')
+  --minimal             Minimal FFmpeg compile including h264, x264, alsa sound and fonts
+  --run-as RUN_AS       compile programs as provided user (suggested 'pi', defaults to 'root')
   --disable-fdk-aac     Normally installed on full install
   --disable_avisynth    Normally installed on full install
   --disable-dav1d       Normally installed on full install
@@ -101,8 +101,17 @@ optional arguments:
   --disable-libsrt      Normally installed on full install
   --rebuild-all         Recompile all libraries
   --safe                disable overwrite of existing or old scripts
+
 ```
 
 ## License
 
 MIT License - Copyright (c) 2020 Chris Griffith
+
+
+## Debuging
+
+### Error: ioctl(VIDIOC_STREAMON) failure : 1, Operation not permitted
+
+Go into raspi-config and up the video memory (memory split) to 256 and reboot. (thanks to #15 [rezrov](https://github.com/cdgriffith/pi_streaming_setup/issues/15))
+
