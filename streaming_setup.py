@@ -146,7 +146,8 @@ def parse_arguments():
     parser.add_argument("--rtsp-url", default="",
                         help="Provide a remote RTSP url to connect to and don't set up a local server")
     parser.add_argument("-f", "--input-format", default=fmt, help=f"The format the camera supports (using {fmt})")
-    parser.add_argument("-b", "--bitrate", default="dynamic", help=f"Streaming bitrate, is auto calculated by default")
+    parser.add_argument("-b", "--bitrate", default="dynamic", help=f"Streaming bitrate, is auto calculated by default."
+                                                                   f" (Will be ignored if the codec is 'copy')")
     parser.add_argument("-c", "--codec", default=codec, help=f"Conversion codec (using '{codec}')")
     parser.add_argument(
         "--ffmpeg-params",
@@ -667,14 +668,10 @@ def prepare_ffmpeg_command(input_format,
         path = default_paths[fmt]
 
     if codec != "copy":
-        if "-b" not in ffmpeg_params and bitrate == "dynamic":
+        if (not ffmpeg_params or "-b" not in ffmpeg_params) and bitrate == "dynamic":
             x, y = video_size.split("x")
             bitrate = (int(x) * int(y) * 2) // 1024
             ffmpeg_params += f" -b:v {bitrate}k"
-        else:
-            if not bitrate.lower().endswith(("m", "k", "g")):
-                bitrate += "k"
-            ffmpeg_params += f" -b:v {bitrate}"
 
     if fmt == "dash":
         out = ("-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 "
