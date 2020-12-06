@@ -151,7 +151,8 @@ def parse_arguments():
     parser.add_argument("-c", "--codec", default=codec, help=f"Conversion codec (using '{codec}')")
     parser.add_argument(
         "--ffmpeg-params", default="",
-        help="specify additional FFmpeg params, helpful if not copying codec e.g.: '-b:v 4M -maxrate 4M -buffsize 8M' ",
+        help="specify additional FFmpeg params, MUST be doubled quoted! helpful "
+             "if not copying codec e.g.: '\"-b:v 4M -maxrate 4M -buffsize 8M\"' ",
     )
     parser.add_argument("--index-file", default="/var/lib/streaming/index.html")
     parser.add_argument("--on-reboot-file", default="/var/lib/streaming/setup_streaming.sh")
@@ -666,6 +667,9 @@ def prepare_ffmpeg_command(input_format,
                      "rtsp": "rtsp://localhost:8554/streaming"}
     if not path:
         path = default_paths[fmt]
+
+    if ffmpeg_params:
+        ffmpeg_params = ffmpeg_params.strip("\"'")
 
     if codec != "copy":
         if "-b" not in ffmpeg_params and bitrate == "dynamic":
