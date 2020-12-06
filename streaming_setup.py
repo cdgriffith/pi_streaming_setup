@@ -150,7 +150,7 @@ def parse_arguments():
                                                                    f" (Will be ignored if the codec is 'copy')")
     parser.add_argument("-c", "--codec", default=codec, help=f"Conversion codec (using '{codec}')")
     parser.add_argument(
-        "--ffmpeg-params",
+        "--ffmpeg-params", default="",
         help="specify additional FFmpeg params, helpful if not copying codec e.g.: '-b:v 4M -maxrate 4M -buffsize 8M' ",
     )
     parser.add_argument("--index-file", default="/var/lib/streaming/index.html")
@@ -668,10 +668,14 @@ def prepare_ffmpeg_command(input_format,
         path = default_paths[fmt]
 
     if codec != "copy":
-        if (not ffmpeg_params or "-b" not in ffmpeg_params) and bitrate == "dynamic":
+        if "-b" not in ffmpeg_params and bitrate == "dynamic":
             x, y = video_size.split("x")
             bitrate = (int(x) * int(y) * 2) // 1024
             ffmpeg_params += f" -b:v {bitrate}k"
+        else:
+            if not bitrate.lower().endswith(("m", "k", "g")):
+                bitrate += "k"
+            ffmpeg_params += f" -b:v {bitrate}"
 
     if fmt == "dash":
         out = ("-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 "
