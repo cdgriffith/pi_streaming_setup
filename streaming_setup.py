@@ -30,7 +30,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.6"
+__version__ = "1.6.1"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -362,7 +362,7 @@ def install_ffmpeg():
 def compile_ffmpeg(extra_libs, minimal_install=False):
     ffmpeg_configures, apt_installs = [], []
 
-    for f, a in (all_ffmpeg_config if not minimal_install else minimal_install):
+    for f, a in (all_ffmpeg_config if not minimal_install else minimal_ffmpeg_config):
         ffmpeg_configures.append(f)
         apt_installs.append(a)
 
@@ -762,12 +762,19 @@ def install_rtsp():
     rtsp_assets = json.loads(urlopen(rtsp_releases[0]["assets_url"]).read().decode('utf-8'))
     lscpu = lscpu_output()
     mappings = {
-        "armv7l": "arm7",
-        "armv6l": "arm6",
-        "aarch64": "arm64"
+        "armv7l": "armv7",
+        "armv6l": "armv6",
+        "aarch64": "armv64"
     }
     if lscpu["architecture"] not in mappings:
-        raise Exception(f"Don't know the arch {lscpu['architecture']}")
+        # Old mapping style for safety
+        mappings = {
+            "armv7l": "arm7",
+            "armv6l": "arm6",
+            "aarch64": "arm64"
+        }
+        if lscpu["architecture"] not in mappings:
+            raise Exception(f"Don't know the arch {lscpu['architecture']}")
 
     arch = mappings[lscpu["architecture"]]
 
