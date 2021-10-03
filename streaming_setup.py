@@ -30,7 +30,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.6.1"
+__version__ = "1.6.2"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -74,7 +74,7 @@ all_ffmpeg_config = minimal_ffmpeg_config + [
     ("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"),  # aarch64 64 issues
     ("--enable-librtmp", "librtmp-dev"),
     ("--enable-libass", "libass-dev"),
-    ("--enable-avresample", "libavresample-dev"),
+    ("--enable-swresample", "libswresample-dev"),
     ("--enable-fontconfig", "libfontconfig1-dev"),
     ("--enable-chromaprint", "libchromaprint-dev"),
     ("--enable-frei0r", "frei0r-plugins-dev"),
