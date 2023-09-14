@@ -30,7 +30,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.6.2"
+__version__ = "1.7"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -143,16 +143,22 @@ def parse_arguments():
         "-s", "--video-size", default=resolution, help=f"The video resolution from the camera (using {resolution})"
     )
     parser.add_argument("-r", "--rtsp", action="store_true", help="Use RTSP instead of DASH / HLS")
-    parser.add_argument("--rtsp-url", default="",
-                        help="Provide a remote RTSP url to connect to and don't set up a local server")
+    parser.add_argument(
+        "--rtsp-url", default="", help="Provide a remote RTSP url to connect to and don't set up a local server"
+    )
     parser.add_argument("-f", "--input-format", default=fmt, help=f"The format the camera supports (using {fmt})")
-    parser.add_argument("-b", "--bitrate", default="dynamic", help=f"Streaming bitrate, is auto calculated by default."
-                                                                   f" (Will be ignored if the codec is 'copy')")
+    parser.add_argument(
+        "-b",
+        "--bitrate",
+        default="dynamic",
+        help=f"Streaming bitrate, is auto calculated by default." f" (Will be ignored if the codec is 'copy')",
+    )
     parser.add_argument("-c", "--codec", default=codec, help=f"Conversion codec (using '{codec}')")
     parser.add_argument(
-        "--ffmpeg-params", default="",
+        "--ffmpeg-params",
+        default="",
         help="specify additional FFmpeg params, MUST be doubled quoted! helpful "
-             "if not copying codec e.g.: '\"-b:v 4M -maxrate 4M -buffsize 8M\"' ",
+        "if not copying codec e.g.: '\"-b:v 4M -maxrate 4M -buffsize 8M\"' ",
     )
     parser.add_argument("--index-file", default="/var/lib/streaming/index.html")
     parser.add_argument("--on-reboot-file", default="/var/lib/streaming/setup_streaming.sh")
@@ -171,7 +177,7 @@ def parse_arguments():
         "--run-as", default="root", help="compile programs as provided user (suggested 'pi', defaults to 'root')"
     )
     parser.add_argument("--disable-fdk-aac", action="store_true", help="Normally installed on full install")
-    parser.add_argument("--disable_avisynth", action="store_true", help="Normally installed on full install")
+    parser.add_argument("--disable-avisynth", action="store_true", help="Normally installed on full install")
     parser.add_argument("--disable-dav1d", action="store_true", help="Normally installed on full install")
     parser.add_argument("--disable-zimg", action="store_true", help="Normally installed on full install")
     parser.add_argument("--disable-kvazaar", action="store_true", help="Normally installed on full install")
@@ -228,26 +234,26 @@ def apt(command, cwd=here):
 
 def lscpu_output():
     results = json.loads(run("lscpu -J", shell=True, stdout=PIPE).stdout.decode("utf-8").lower())
-    return {x["field"].replace(':',''): x["data"] for x in results["lscpu"]}
+    return {x["field"].replace(":", ""): x["data"] for x in results["lscpu"]}
 
 
 def raspberry_proc_info(cores_only=False):
     results = lscpu_output()
     if cores_only:
-        return int(results.get('cpu(s)', 1))
+        return int(results.get("cpu(s)", 1))
     log.info(f"Model Info: {Path('/proc/device-tree/model').read_text()}")
-    if 'architecture' not in results:
+    if "architecture" not in results:
         log.warning(f"Could not grab architecture information from lscpu, defaulting to armhf: {results}")
         return "--arch=armhf "
-    if "armv7" in results['architecture']:
-        if "cortex-a72" in results['model name']:
+    if "armv7" in results["architecture"]:
+        if "cortex-a72" in results["model name"]:
             # Raspberry Pi 4 Model B
             log.info("Optimizing for cortex-a72 processor")
             return (
                 "--arch=armv7 --cpu=cortex-a72 --enable-neon "
                 "--extra-cflags='-mtune=cortex-a72 -mfpu=neon-vfpv4 -mfloat-abi=hard'"
             )
-        if "cortex-a53" in results['model name']:
+        if "cortex-a53" in results["model name"]:
             # Raspberry Pi 3 Model B
             log.info("Optimizing for cortex-a53 processor")
             return (
@@ -256,17 +262,22 @@ def raspberry_proc_info(cores_only=False):
             )
         log.info("Using architecture 'armv7'")
         return "--arch=armv7 --enable-neon "
-    if "armv6" in results['architecture']:
+    if "armv6" in results["architecture"]:
         # Raspberry Pi Zero
         log.info("Using architecture 'armv6'")
         return "--arch=armv6"
-    if "aarch64" in results['architecture']:
+    if "aarch64" in results["architecture"]:
         # Using new raspberry pi 64 bit OS
         log.info("Using architecture 'aarch64'")
-        raise Exception("This may break with the current Raspberry Pi 64 bit build as of 07/2020. "
-                        "Only remove this line of code and uncomment next one "
-                        "if you are prepared to reinstall the OS if it doesn't work. (Please report if it works)")
+        raise Exception(
+            "This may break with the current Raspberry Pi 64 bit build as of 07/2020. "
+            "Only remove this line of code and uncomment next one "
+            "if you are prepared to reinstall the OS if it doesn't work. (Please report if it works)"
+        )
         # return "--arch=aarch64"
+    if "x86_64" in results["architecture"] or "amd64" in results["architecture"]:
+        log.info("Using architecture 'x86_64'")
+        return "--arch=x86_64"
     log.info("Defaulting to architecture 'armhf'")
     return "--arch=armhf"
 
@@ -362,7 +373,7 @@ def install_ffmpeg():
 def compile_ffmpeg(extra_libs, minimal_install=False):
     ffmpeg_configures, apt_installs = [], []
 
-    for f, a in (all_ffmpeg_config if not minimal_install else minimal_ffmpeg_config):
+    for f, a in all_ffmpeg_config if not minimal_install else minimal_ffmpeg_config:
         ffmpeg_configures.append(f)
         apt_installs.append(a)
 
@@ -654,17 +665,10 @@ fi
     cmd(f"/bin/bash {on_reboot_file}", demote=False)
 
 
-def prepare_ffmpeg_command(input_format,
-                           video_size,
-                           video_device,
-                           codec,
-                           ffmpeg_params,
-                           fmt,
-                           disable_hls=False,
-                           path=None,
-                           bitrate="dynamic"):
-    default_paths = {'dash': "/dev/shm/streaming/manifest.mpd",
-                     "rtsp": "rtsp://localhost:8554/streaming"}
+def prepare_ffmpeg_command(
+    input_format, video_size, video_device, codec, ffmpeg_params, fmt, disable_hls=False, path=None, bitrate="dynamic"
+):
+    default_paths = {"dash": "/dev/shm/streaming/manifest.mpd", "rtsp": "rtsp://localhost:8554/streaming"}
     if not path:
         path = default_paths[fmt]
 
@@ -682,8 +686,10 @@ def prepare_ffmpeg_command(input_format,
             ffmpeg_params += f" -b:v {bitrate}"
 
     if fmt == "dash":
-        out = ("-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 "
-              f"{'' if disable_hls else '-hls_playlist 1 '}{path}")
+        out = (
+            "-f dash -remove_at_exit 1 -window_size 5 -use_timeline 1 -use_template 1 "
+            f"{'' if disable_hls else '-hls_playlist 1 '}{path}"
+        )
     elif fmt == "rtsp":
         out = f"-f rtsp {path}"
     else:
@@ -694,7 +700,6 @@ def prepare_ffmpeg_command(input_format,
         f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
         f"-c:v {codec} {ffmpeg_params if ffmpeg_params else ''} {out}"
     ).replace("  ", " ")
-
 
 
 def install_ffmpeg_systemd_file(systemd_file, ffmpeg_command):
@@ -727,7 +732,7 @@ WantedBy=multi-user.target
 
 
 def install_rtsp_systemd(rtsp_systemd_file):
-    contents = """# /etc/systemd/system/rtsp_server.service
+    contents = """# /etc/systemd/system/mediamtx.service
 
 [Unit]
 Description=rtsp_server
@@ -736,7 +741,7 @@ After=network.target rc-local.service
 [Service]
 Restart=always
 WorkingDirectory=/var/lib/streaming/
-ExecStart=/var/lib/streaming/rtsp-simple-server
+ExecStart=/var/lib/streaming/mediamtx
 
 [Install]
 WantedBy=multi-user.target
@@ -758,32 +763,27 @@ def install_rtsp():
     from urllib.request import urlopen
     import shutil
     import tarfile
-    rtsp_releases = json.loads(urlopen(f"https://api.github.com/repos/aler9/rtsp-simple-server/releases").read().decode('utf-8'))
-    rtsp_assets = json.loads(urlopen(rtsp_releases[0]["assets_url"]).read().decode('utf-8'))
+
+    rtsp_releases = json.loads(
+        urlopen(f"https://api.github.com/repos/bluenviron/mediamtx/releases").read().decode("utf-8")
+    )
+    rtsp_assets = json.loads(urlopen(rtsp_releases[0]["assets_url"]).read().decode("utf-8"))
     lscpu = lscpu_output()
-    mappings = {
-        "armv7l": "armv7",
-        "armv6l": "armv6",
-        "aarch64": "armv64"
-    }
+    mappings = {"armv7l": "armv7", "armv6l": "armv6", "aarch64": "armv64"}
     if lscpu["architecture"] not in mappings:
         # Old mapping style for safety
-        mappings = {
-            "armv7l": "arm7",
-            "armv6l": "arm6",
-            "aarch64": "arm64"
-        }
+        mappings = {"armv7l": "arm7", "armv6l": "arm6", "aarch64": "arm64"}
         if lscpu["architecture"] not in mappings:
-            raise Exception(f"Don't know the arch {lscpu['architecture']}")
+            raise Exception(f"mediaatx does not support arch {lscpu['architecture']}")
 
     arch = mappings[lscpu["architecture"]]
 
     sd = Path("/var/lib/streaming/")
     sd.mkdir(exist_ok=True)
-        
+
     for asset in rtsp_assets:
         if arch in asset["name"]:
-            with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], 'wb') as out_file:
+            with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], "wb") as out_file:
                 shutil.copyfileobj(response, out_file)
             with tarfile.open(sd / asset["name"]) as tf:
                 tf.extractall(path=sd)
@@ -826,7 +826,7 @@ def main():
         ffmpeg_params=args.ffmpeg_params,
         fmt="rtsp" if args.rtsp else "dash",
         path=output_path,
-        bitrate=args.bitrate
+        bitrate=args.bitrate,
     )
 
     if args.ffmpeg_command:
@@ -878,7 +878,8 @@ def main():
                 extra_libs.append(install_srt())
             cmd("ldconfig", demote=False)
         compile_ffmpeg(
-            extra_libs=" ".join(extra_libs), minimal_install=args.minimal,
+            extra_libs=" ".join(extra_libs),
+            minimal_install=args.minimal,
         )
     else:
         install_ffmpeg()

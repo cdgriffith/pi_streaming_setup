@@ -18,11 +18,11 @@ You will not be able to share the built binaries under any license.
 
 This script requires Python 3.6+
 
-## MPEG DASH / HLS 
+## MPEG DASH / HLS
 
-DASH is a great way to use your device as standalone streaming server with a easy to view webpage hosted on the Pi. 
+DASH is a great way to use your device as standalone streaming server with a easy to view webpage hosted on the Pi.
 The disadvantage is the delay due to buffering and the way DASH / HLS work with manifest files. You will have a 5~20
-second lag from the camera to when you view it. 
+second lag from the camera to when you view it.
 
 To use the pre-built FFmpeg and MPEG DASH, just need to run the script as root / sudo then you're good to go:
 
@@ -30,11 +30,11 @@ To use the pre-built FFmpeg and MPEG DASH, just need to run the script as root /
 sudo python3 streaming_setup.py
 ```
 
-## RTSP 
+## RTSP
 
 If you want near instant real time streaming, it's best to use the aptly named Real Time Streaming Protocol, RTSP.
 
-``` 
+```
 sudo python3 streaming_setup.py --rtsp
 ```
 
@@ -46,7 +46,7 @@ sudo python3 streaming_setup.py --rtsp --rtsp-url rtsp://192.168.1.123:8554/rasp
 
 ## Compile FFmpeg
 If you want to compile FFmpeg make sure to pass the `--compile-ffmpeg` flag
-and I suggest setting the user to `pi` if making in your home directory. 
+and I suggest setting the user to `pi` if making in your home directory.
 
 ```
 sudo python3 streaming_setup.py --compile-ffmpeg --run-as pi
@@ -55,13 +55,13 @@ sudo python3 streaming_setup.py --compile-ffmpeg --run-as pi
 
 
 
-## Script Options 
+## Script Options
 
 ```
-usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL] [-f INPUT_FORMAT] [-b BITRATE] 
-                       [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS] [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] 
+usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL] [-f INPUT_FORMAT] [-b BITRATE]
+                       [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS] [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE]
                        [--systemd-file SYSTEMD_FILE] [--compile-ffmpeg] [--compile-only] [--camera-info]
-                       [--minimal] [--run-as RUN_AS] [--disable-fdk-aac] [--disable_avisynth] [--disable-dav1d] 
+                       [--minimal] [--run-as RUN_AS] [--disable-fdk-aac] [--disable_avisynth] [--disable-dav1d]
                        [--disable-zimg] [--disable-kvazaar] [--disable-libxavs] [--disable-libsrt] [--rebuild-all] [--safe]
 
 streaming_setup version 1.6
@@ -93,7 +93,7 @@ optional arguments:
   --minimal             Minimal FFmpeg compile including h264, x264, alsa sound and fonts
   --run-as RUN_AS       compile programs as provided user (suggested 'pi', defaults to 'root')
   --disable-fdk-aac     Normally installed on full install
-  --disable_avisynth    Normally installed on full install
+  --disable-avisynth    Normally installed on full install
   --disable-dav1d       Normally installed on full install
   --disable-zimg        Normally installed on full install
   --disable-kvazaar     Normally installed on full install
@@ -114,4 +114,3 @@ MIT License - Copyright (c) 2020 Chris Griffith
 ### Error: ioctl(VIDIOC_STREAMON) failure : 1, Operation not permitted
 
 Go into raspi-config and up the video memory (memory split) to 256 and reboot. (thanks to #15 [rezrov](https://github.com/cdgriffith/pi_streaming_setup/issues/15))
-
