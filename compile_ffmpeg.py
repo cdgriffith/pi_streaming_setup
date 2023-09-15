@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+"""
+If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
+
+Be aware, this will build a NON-REDISTRIBUTABLE FFmpeg.
+You will not be able to share the built binaries under any license.
+"""
 import logging
 import os
 import sys

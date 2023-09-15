@@ -11,11 +11,6 @@ The steps it will attempt to take:
 * Update rc.local to run required setup script on reboot
 * Create index.html file to view video stream at
 * Create systemd service and enable it
-
-If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
-
-If you are compilng FFmpeg, be aware, this will build a NON-REDISTRIBUTABLE FFmpeg.
-You will not be able to share the built binaries under any license.
 """
 
 import logging
@@ -378,7 +373,7 @@ def prepare_ffmpeg_command(
 
     return (
         f"{shutil.which('ffmpeg')} -nostdin -hide_banner -loglevel error "
-        f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} -g 30 "
+        f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
         f"-c:v {codec} {ffmpeg_params if ffmpeg_params else ''} {out}"
     ).replace("  ", " ")
 
@@ -450,9 +445,11 @@ def install_rtsp(rtsp_systemd_file):
         result = run(f"{sd / 'mediamtx'} --version", shell=True, stdout=PIPE, stderr=STDOUT)
         existing_version = result.stdout.decode("utf-8").strip()
 
-    rtsp_releases = json.loads(
-        urlopen(f"https://api.github.com/repos/bluenviron/mediamtx/releases").read().decode("utf-8")
-    )
+    release_url = "https://api.github.com/repos/bluenviron/mediamtx/releases"
+
+    log.info(f"Grabbing RTSP Server mediamtx information from github: {release_url}")
+
+    rtsp_releases = json.loads(urlopen(release_url).read().decode("utf-8"))
 
     if existing_version:
         if rtsp_releases[0]["tag_name"] == existing_version:
@@ -464,6 +461,8 @@ def install_rtsp(rtsp_systemd_file):
                 cmd(f"systemctl stop {rtsp_systemd_file.stem}", demote=False)
             except Exception:
                 pass
+
+    log.info(f'Downloading RTSP Server mediamtx {rtsp_releases[0]["tag_name"]}')
 
     rtsp_assets = json.loads(urlopen(rtsp_releases[0]["assets_url"]).read().decode("utf-8"))
     lscpu = lscpu_output()
@@ -553,7 +552,7 @@ def main():
 
     log.info(f"Starting streaming_setup {__version__}")
     arg_display = "\n\t".join([f"{k}: {v}" for k, v in vars(args).items()])
-    log.debug(f"Using arguments: {arg_display}")
+    log.debug(f"Using arguments:\n{arg_display}")
     index_file = Path(args.index_file)
     on_reboot_file = Path(args.on_reboot_file)
     systemd_file = Path(args.systemd_file)
