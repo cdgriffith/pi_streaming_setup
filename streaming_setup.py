@@ -2,19 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 This script is designed to help automate turing a raspberry pi with a
-compatible video4linux2 camera into a MPEG-DASH / HLS streaming server.
+compatible video4linux2 camera into an MPEG-DASH / HLS streaming server.
 
 The steps it will attempt to take:
 
 * Install nginx
-* Install FFmpeg OR (optional) Compile and Install FFmpeg with h264 hardware acceleration
+* Install FFmpeg OR
 * Update rc.local to run required setup script on reboot
 * Create index.html file to view video stream at
 * Create systemd service and enable it
 
 If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
 
-If you are compilng FFmpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
+If you are compilng FFmpeg, be aware, this will build a NON-REDISTRIBUTABLE FFmpeg.
 You will not be able to share the built binaries under any license.
 """
 
@@ -52,88 +52,15 @@ here = Path(__file__).parent
 disable_overwrite = False
 run_as = "root"
 rebuild_all = False
-
-# Different levels of FFmpeg configurations
-# They are set to be in format ( configuration flag(s), apt library(s) )
-
-# Minimal h264, x264, alsa sound and fonts
-minimal_ffmpeg_config = [
-    ("--enable-libx264", "libx264-dev"),
-    ("--enable-indev=alsa --enable-outdev=alsa", "libasound2-dev"),
-    ("--enable-mmal --enable-omx --enable-omx-rpi", "libomxil-bellagio-dev"),
-    ("--enable-libfreetype", "libfreetype6-dev fonts-freefont-ttf"),
-]
-
-all_ffmpeg_config = minimal_ffmpeg_config + [
-    ("--enable-libx265", "libx265-dev"),
-    ("--enable-libvpx", "libvpx-dev"),
-    ("--enable-libmp3lame", "libmp3lame-dev"),
-    ("--enable-libvorbis", "libvorbis-dev"),
-    ("--enable-libopus", "libopus-dev"),
-    ("--enable-libtheora", "libtheora-dev"),
-    ("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"),  # aarch64 64 issues
-    ("--enable-librtmp", "librtmp-dev"),
-    ("--enable-libass", "libass-dev"),
-    ("--enable-swresample", "libswresample-dev"),
-    ("--enable-fontconfig", "libfontconfig1-dev"),
-    ("--enable-chromaprint", "libchromaprint-dev"),
-    ("--enable-frei0r", "frei0r-plugins-dev"),
-    ("--enable-libsoxr", "libsoxr-dev"),
-    ("--enable-libwebp", "libwebp-dev"),
-    ("--enable-libbluray", "libbluray-dev"),
-    ("--enable-librubberband", "librubberband-dev"),
-    ("--enable-libspeex", "libspeex-dev"),
-    ("--enable-libvidstab", "libvidstab-dev"),
-    ("--enable-libxvid", "libxvidcore-dev"),
-    ("--enable-libxml2", "libxml2-dev"),
-    ("--enable-libfribidi", "libfribidi-dev"),
-    ("--enable-libgme", "libgme-dev"),
-    ("--enable-openssl", "libssl-dev"),
-    ("--enable-gmp", "libgmp-dev"),
-    ("--enable-libbs2b", "libbs2b-dev"),
-    ("--enable-libcaca", "libcaca-dev"),
-    ("--enable-libcdio", "libcdio-dev libcdio-paranoia-dev"),
-    ("--enable-libdc1394", "libdc1394-22-dev"),
-    ("--enable-libflite", "flite1-dev"),
-    ("--enable-libfontconfig", "libfontconfig1-dev"),
-    ("--enable-libgsm", "libgsm1-dev"),
-    ("--enable-libjack", "libjack-dev libjack0"),
-    ("--enable-libmodplug", "libmodplug-dev"),
-    ("--enable-libopenmpt", "libopenmpt-dev"),
-    ("--enable-libpulse", "libpulse-dev"),
-    ("--enable-librsvg", "librsvg2-dev"),
-    ("--enable-libshine", "libshine-dev"),
-    ("--enable-libsnappy", "libsnappy-dev"),
-    ("--enable-libssh", "libssh-dev"),
-    ("--enable-libtesseract", "libtesseract-dev"),
-    ("--enable-libtwolame", "libtwolame-dev"),
-    ("--enable-libxcb", "libxcb1-dev"),
-    ("--enable-libxcb-shm", "libxcb-shm0-dev"),
-    ("--enable-libxcb-xfixes", "libxcb-xfixes0-dev"),
-    ("--enable-libxcb-shape", "libxcb-shape0-dev"),
-    ("--enable-libzmq", "libzmq3-dev"),
-    ("--enable-libzvbi", "libzvbi-dev"),
-    ("--enable-libdrm", "libdrm-dev"),
-    ("--enable-openal", "libopenal-dev"),
-    ("--enable-opengl", "libopengl-dev"),  # aarch64 issues
-    ("--enable-ladspa", "libags-audio-dev libladspa-ocaml-dev"),
-    ("--enable-sdl2", "libsdl2-dev"),
-    ("--enable-libcodec2", "libcodec2-dev"),
-    ("--enable-lv2", "lv2-dev liblilv-dev"),
-    ("--enable-libaom", "libaom-dev"),
-    ("--enable-libopencore-amrwb", "libopencore-amrwb-dev"),
-    ("--enable-libopencore-amrnb", "libopencore-amrnb-dev"),
-    ("--enable-libvo-amrwbenc", "libvo-amrwbenc-dev"),
-    # ("--enable-libwavpack", "libwavpack-dev"), # Option removed as of 10/22/20
-    # ('--enable-libmysofa', 'libmysofa-dev'), # error: 'mysofa_neighborhood_init_withstepdefine' undeclared
-    # ('--enable-libsmbclient', 'libsmbclient-dev'),  # not found, even with --extra-cflags="-I/usr/include/samba-4.0"
-    # ('--enable-libiec61883', 'libiec61883-dev libiec61883-0'), # cannot find -lavc1394, cannot find -lrom1394
-]
+warn_no_camera = False
+detected_arch = None
+detected_model = ""
+detected_cores = 1
 
 
 def parse_arguments():
     device, fmt, resolution = find_best_device()
-    codec = "copy" if fmt == "h264" else "h264_omx"
+    codec = "copy" if fmt == "h264" else "h264_v4l2m2m"
 
     parser = ArgumentParser(prog="streaming_setup", description=f"streaming_setup version {__version__}")
     parser.add_argument("-v", "--version", action="store_true")
@@ -176,14 +103,7 @@ def parse_arguments():
     parser.add_argument(
         "--run-as", default="root", help="compile programs as provided user (suggested 'pi', defaults to 'root')"
     )
-    parser.add_argument("--disable-fdk-aac", action="store_true", help="Normally installed on full install")
-    parser.add_argument("--disable-avisynth", action="store_true", help="Normally installed on full install")
-    parser.add_argument("--disable-dav1d", action="store_true", help="Normally installed on full install")
-    parser.add_argument("--disable-zimg", action="store_true", help="Normally installed on full install")
-    parser.add_argument("--disable-kvazaar", action="store_true", help="Normally installed on full install")
-    parser.add_argument("--disable-libxavs", action="store_true", help="Normally installed on full install")
-    parser.add_argument("--disable-libsrt", action="store_true", help="Normally installed on full install")
-    parser.add_argument("--rebuild-all", action="store_true", help="Recompile all libraries")
+
     parser.add_argument("--safe", action="store_true", help="disable overwrite of existing or old scripts")
     return parser.parse_args()
 
@@ -235,51 +155,6 @@ def apt(command, cwd=here):
 def lscpu_output():
     results = json.loads(run("lscpu -J", shell=True, stdout=PIPE).stdout.decode("utf-8").lower())
     return {x["field"].replace(":", ""): x["data"] for x in results["lscpu"]}
-
-
-def raspberry_proc_info(cores_only=False):
-    results = lscpu_output()
-    if cores_only:
-        return int(results.get("cpu(s)", 1))
-    log.info(f"Model Info: {Path('/proc/device-tree/model').read_text()}")
-    if "architecture" not in results:
-        log.warning(f"Could not grab architecture information from lscpu, defaulting to armhf: {results}")
-        return "--arch=armhf "
-    if "armv7" in results["architecture"]:
-        if "cortex-a72" in results["model name"]:
-            # Raspberry Pi 4 Model B
-            log.info("Optimizing for cortex-a72 processor")
-            return (
-                "--arch=armv7 --cpu=cortex-a72 --enable-neon "
-                "--extra-cflags='-mtune=cortex-a72 -mfpu=neon-vfpv4 -mfloat-abi=hard'"
-            )
-        if "cortex-a53" in results["model name"]:
-            # Raspberry Pi 3 Model B
-            log.info("Optimizing for cortex-a53 processor")
-            return (
-                "--arch=armv7 --cpu=cortex-a53 --enable-neon "
-                "--extra-cflags='-mtune=cortex-a53 -mfpu=neon-vfpv4 -mfloat-abi=hard'"
-            )
-        log.info("Using architecture 'armv7'")
-        return "--arch=armv7 --enable-neon "
-    if "armv6" in results["architecture"]:
-        # Raspberry Pi Zero
-        log.info("Using architecture 'armv6'")
-        return "--arch=armv6"
-    if "aarch64" in results["architecture"]:
-        # Using new raspberry pi 64 bit OS
-        log.info("Using architecture 'aarch64'")
-        raise Exception(
-            "This may break with the current Raspberry Pi 64 bit build as of 07/2020. "
-            "Only remove this line of code and uncomment next one "
-            "if you are prepared to reinstall the OS if it doesn't work. (Please report if it works)"
-        )
-        # return "--arch=aarch64"
-    if "x86_64" in results["architecture"] or "amd64" in results["architecture"]:
-        log.info("Using architecture 'x86_64'")
-        return "--arch=x86_64"
-    log.info("Defaulting to architecture 'armhf'")
-    return "--arch=armhf"
 
 
 def camera_info(device, hide_error=False):
@@ -334,6 +209,7 @@ def camera_info(device, hide_error=False):
 
 
 def find_best_device():
+    global warn_no_camera
     current_best = ("", {})
     for device in Path("/dev/").glob("video?"):
         options = camera_info(device, hide_error=True)
@@ -344,6 +220,7 @@ def find_best_device():
         elif "h264" not in current_best[1]:
             current_best = (device, options)
     if not current_best[0]:
+        warn_no_camera = True
         return "/dev/video0", "h264", "1920x1080"  # Assume user will connect pi camera
     for fmt in ("h264", "mjpeg", "yuyv422", "yuv420p"):
         if fmt in current_best[1]:
@@ -370,41 +247,6 @@ def install_ffmpeg():
     apt("apt install -y ffmpeg")
 
 
-def compile_ffmpeg(extra_libs, minimal_install=False):
-    ffmpeg_configures, apt_installs = [], []
-
-    for f, a in all_ffmpeg_config if not minimal_install else minimal_ffmpeg_config:
-        ffmpeg_configures.append(f)
-        apt_installs.append(a)
-
-    ffmpeg_libs = "{}".format(" ".join(ffmpeg_configures))
-    processor_info = raspberry_proc_info()  # Needs to be here to proper error before the apt install
-
-    log.info("Installing FFmpeg requirements")
-    apt("apt install -y git checkinstall build-essential {}".format(" ".join(apt_installs)))
-
-    ffmpeg_dir = here / "FFmpeg"
-    if not ffmpeg_dir.exists():
-        log.info("Grabbing FFmpeg")
-        cmd("git clone https://github.com/FFmpeg/FFmpeg.git FFmpeg --depth 1", cwd=here)
-    else:
-        log.info("FFmpeg exists: updating FFmpeg via git pull")
-        cmd("git pull", cwd=ffmpeg_dir)
-
-    log.info("Configuring FFmpeg")
-    cmd(
-        f"./configure {processor_info} --target-os=linux "
-        '--extra-libs="-lpthread -lm" --extra-ldflags="-latomic" '
-        "--enable-static --disable-shared --disable-debug --enable-gpl --enable-version3 --enable-nonfree  "
-        f"{ffmpeg_libs} {extra_libs}",
-        cwd=ffmpeg_dir,
-    )
-
-    log.info("Building FFmpeg (This will take a while)")
-    cmd(f"make {'-j4' if raspberry_proc_info(cores_only=True) >= 4 else ''}", cwd=ffmpeg_dir)
-    install_compiled_ffmpeg()
-
-
 def ensure_library_dir():
     lib_path = Path(here, "ffmpeg-libraries")
     return user_dir(lib_path)
@@ -415,169 +257,6 @@ def user_dir(new_path):
     pw_record = pwd.getpwnam(run_as)
     os.chown(new_path, pw_record.pw_uid, pw_record.pw_gid)
     return new_path
-
-
-def install_fdk_aac():
-    if not rebuild_all and Path("/usr/local/lib/libfdk-aac.la").exists():
-        log.info("libfdk-aac already built")
-        return "--enable-libfdk-aac"
-
-    log.info("Building libfdk-aac")
-    lib_dir = ensure_library_dir()
-    sub_dir = lib_dir / "fdk_aac"
-    apt("apt install -y automake libtool")
-    if sub_dir.exists():
-        cmd("git pull", cwd=sub_dir)
-    else:
-        cmd(f"git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git fdk_aac", cwd=lib_dir)
-    cmd("autoreconf -fiv", cwd=sub_dir)
-    cmd("./configure", cwd=sub_dir)
-    cmd(f"make {'-j4' if raspberry_proc_info(cores_only=True) >= 4 else ''}", cwd=sub_dir)
-    cmd("make install", cwd=sub_dir, demote=False)
-    return "--enable-libfdk-aac"
-
-
-def install_avisynth():
-    if not rebuild_all and Path("/usr/local/include/avisynth/avisynth_c.h").exists():
-        log.info("AviSynth headers already built")
-        return "--enable-avisynth"
-
-    log.info("Building AviSynth headers")
-    apt("apt install -y cmake")
-    lib_dir = ensure_library_dir()
-    sub_dir = lib_dir / "AviSynthPlus"
-    if sub_dir.exists():
-        cmd("git pull", cwd=sub_dir)
-    else:
-        cmd(f"git clone --depth 1 https://github.com/AviSynth/AviSynthPlus.git AviSynthPlus", cwd=lib_dir)
-    build_dir = user_dir(sub_dir / "avisynth-build")
-    cmd("cmake ../ -DHEADERS_ONLY:bool=on", cwd=build_dir)
-    cmd("make install", cwd=build_dir, demote=False)
-    return "--enable-avisynth"
-
-
-def install_libxavs():
-    if not rebuild_all and shutil.which("xavs"):
-        log.info("xavs already built")
-        return "--enable-libxavs"
-
-    log.info("Building xavs headers")
-    apt("apt install -y subversion")
-    lib_dir = ensure_library_dir()
-    sub_dir = lib_dir / "xavs"
-    if sub_dir.exists():
-        cmd("git pull", cwd=sub_dir)
-    else:
-        cmd(f"svn co https://svn.code.sf.net/p/xavs/code/trunk xavs", cwd=lib_dir)
-    cmd("./configure --enable-shared", cwd=sub_dir)
-    cmd("make", cwd=sub_dir)
-    cmd("make install", cwd=sub_dir, demote=False)
-    return "--enable-libxavs"
-
-
-def install_srt():
-    if not rebuild_all and Path("/usr/local/include/srt").exists():
-        log.info("srt already built")
-        return "--enable-libsrt"
-
-    log.info("Building srt headers")
-    apt("apt install -y tclsh pkg-config cmake libssl-dev build-essential")
-    lib_dir = ensure_library_dir()
-    sub_dir = lib_dir / "srt"
-    if sub_dir.exists():
-        cmd("git pull", cwd=sub_dir)
-    else:
-        cmd(f"git clone --depth 1 https://github.com/Haivision/srt.git srt", cwd=lib_dir)
-    cmd("./configure", cwd=sub_dir)
-    cmd("make", cwd=sub_dir)
-    cmd("make install", cwd=sub_dir, demote=False)
-    return "--enable-libsrt"
-
-
-def install_dav1d():
-    if not rebuild_all and shutil.which("dav1d"):
-        log.info("dav1d already built")
-        return "--enable-libdav1d"
-
-    log.info("Building dav1d")
-    lib_dir = ensure_library_dir()
-    sub_dir = lib_dir / "dav1d"
-
-    apt("apt install -y meson ninja-build")
-    if sub_dir.exists():
-        cmd("git pull", cwd=sub_dir)
-    else:
-        cmd(f"git clone --depth 1 https://code.videolan.org/videolan/dav1d.git dav1d", cwd=lib_dir)
-    build_dir = user_dir(sub_dir / "build")
-
-    cmd("meson ..", cwd=build_dir)
-    cmd("ninja", cwd=build_dir)
-    cmd("ninja install", cwd=build_dir, demote=False)
-    return "--enable-libdav1d"
-
-
-def install_zimg():
-    if not rebuild_all and Path("/usr/local/lib/libzimg.la").exists():
-        log.info("libzimg already built")
-        return "--enable-libzimg"
-
-    log.info("Building libzimg")
-    lib_dir = ensure_library_dir()
-    sub_dir = lib_dir / "zimg"
-    if sub_dir.exists():
-        cmd("git pull", cwd=sub_dir)
-    else:
-        cmd(f"git clone https://github.com/sekrit-twc/zimg.git zimg", cwd=lib_dir)
-    cmd("sh autogen.sh", cwd=sub_dir)
-    cmd("./configure", cwd=sub_dir)
-    cmd("make", cwd=sub_dir)
-    cmd("make install", cwd=sub_dir, demote=False)
-    return "--enable-libzimg"
-
-
-def install_kvazaar():
-    if not rebuild_all and shutil.which("kvazaar"):
-        log.info("libkvazaar already built")
-        return "--enable-libkvazaar"
-
-    log.info("Building libkvazaar")
-    lib_dir = ensure_library_dir()
-    sub_dir = lib_dir / "kvazaar"
-    if sub_dir.exists():
-        cmd("git pull", cwd=sub_dir)
-    else:
-        cmd(f"git clone --depth 1 https://github.com/ultravideo/kvazaar.git kvazaar", cwd=lib_dir)
-    cmd("sh autogen.sh", cwd=sub_dir)
-    cmd("./configure", cwd=sub_dir)
-    cmd(f"make {'-j4' if raspberry_proc_info(cores_only=True) >= 4 else ''}", cwd=sub_dir)
-    cmd("make install", cwd=sub_dir, demote=False)
-    return "--enable-libkvazaar"
-
-
-# vmaf giving error: test/meson.build:7:0: ERROR:  Include directory to be added is not an include directory object.
-# def install_vmaf():
-#     # figure out how to detect vmaf installed
-#     lib_dir = ensure_library_dir()
-#
-#     log.info("Building libvmaf")
-#     apt("apt install -y meson ninja-build doxygen")
-#     if (lib_dir / "vmaf").exists():
-#         cmd("git pull", cwd=(lib_dir / "vmaf"))
-#     else:
-#         cmd(f"git clone --depth 1 https://github.com/ultravideo/kvazaar.git kvazaar", cwd=lib_dir)
-#     sub_dir = user_dir(lib_dir / "vmaf" / "libvmaf")
-#     cmd("meson build --buildtype release", cwd=sub_dir)
-#     cmd("ninja -vC build", cwd=sub_dir)
-#     cmd("ninja -vC build install", cwd=sub_dir)
-#     return "--enable-libvmaf"
-
-
-def install_compiled_ffmpeg():
-    log.info("Installing FFmpeg")
-    apt(f"apt remove ffmpeg -y {'' if disable_overwrite else '--allow-change-held-packages'} ")
-    cmd("checkinstall --pkgname=ffmpeg -y", cwd=here / "FFmpeg", demote=False)
-    cmd("apt-mark hold ffmpeg", demote=False)
-    cmd('echo "ffmpeg hold" | sudo dpkg --set-selections', demote=False)
 
 
 def update_rc_local_file(on_reboot_file):
@@ -684,6 +363,8 @@ def prepare_ffmpeg_command(
             if not bitrate.lower().endswith(("m", "k", "g")):
                 bitrate += "k"
             ffmpeg_params += f" -b:v {bitrate}"
+        if "-pix_fmt" not in ffmpeg_params:
+            ffmpeg_params += " -pix_fmt yuv420p "
 
     if fmt == "dash":
         out = (
@@ -696,8 +377,8 @@ def prepare_ffmpeg_command(
         raise Exception("Only support dash and rstp output currently")
 
     return (
-        "ffmpeg -nostdin -hide_banner -loglevel error "
-        f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} "
+        f"{shutil.which('ffmpeg')} -nostdin -hide_banner -loglevel error "
+        f"-f v4l2 -input_format {input_format} -s {video_size} -i {video_device} -g 30 "
         f"-c:v {codec} {ffmpeg_params if ffmpeg_params else ''} {out}"
     ).replace("  ", " ")
 
@@ -732,7 +413,7 @@ WantedBy=multi-user.target
 
 
 def install_rtsp_systemd(rtsp_systemd_file):
-    contents = """# /etc/systemd/system/mediamtx.service
+    contents = """# /etc/systemd/system/rtsp_server.service
 
 [Unit]
 Description=rtsp_server
@@ -759,26 +440,50 @@ WantedBy=multi-user.target
     cmd(f"systemctl enable {rtsp_systemd_file.stem}", demote=False)
 
 
-def install_rtsp():
+def install_rtsp(rtsp_systemd_file):
     from urllib.request import urlopen
-    import shutil
     import tarfile
+
+    sd = Path("/var/lib/streaming/")
+    existing_version = None
+    if sd.exists() and (sd / "mediamtx").exists():
+        result = run(f"{sd / 'mediamtx'} --version", shell=True, stdout=PIPE, stderr=STDOUT)
+        existing_version = result.stdout.decode("utf-8").strip()
 
     rtsp_releases = json.loads(
         urlopen(f"https://api.github.com/repos/bluenviron/mediamtx/releases").read().decode("utf-8")
     )
+
+    if existing_version:
+        if rtsp_releases[0]["tag_name"] == existing_version:
+            log.info("rtsp server is up to date")
+            return
+        else:
+            log.info(f"Updating rtsp server from {existing_version} to {rtsp_releases[0]['tag_name']}")
+            try:
+                cmd(f"systemctl stop {rtsp_systemd_file.stem}", demote=False)
+            except Exception:
+                pass
+
     rtsp_assets = json.loads(urlopen(rtsp_releases[0]["assets_url"]).read().decode("utf-8"))
     lscpu = lscpu_output()
-    mappings = {"armv7l": "armv7", "armv6l": "armv6", "aarch64": "armv64"}
+    mappings = {
+        "armv7l": "armv7",
+        "armv6l": "armv6",
+        "aarch64": "arm64v8",
+    }
     if lscpu["architecture"] not in mappings:
         # Old mapping style for safety
-        mappings = {"armv7l": "arm7", "armv6l": "arm6", "aarch64": "arm64"}
+        mappings = {
+            "armv7l": "arm7",
+            "armv6l": "arm6",
+            "aarch64": "arm64v8",
+        }
         if lscpu["architecture"] not in mappings:
-            raise Exception(f"mediaatx does not support arch {lscpu['architecture']}")
+            raise Exception(f"mediamtx does not support arch {lscpu['architecture']}")
 
     arch = mappings[lscpu["architecture"]]
 
-    sd = Path("/var/lib/streaming/")
     sd.mkdir(exist_ok=True)
 
     for asset in rtsp_assets:
@@ -792,15 +497,20 @@ def install_rtsp():
         raise Exception("Could not find download for rtsp server")
 
 
-def show_services():
+def get_addresses():
     ips = run("hostname -I", shell=True, stdout=PIPE).stdout.decode("utf-8")
     hostname = run("hostname", shell=True, stdout=PIPE).stdout.decode("utf-8").strip()
-    for host in ips.split() + [hostname]:
+    return ips.split() + [hostname]
+
+
+def show_services():
+    for host in get_addresses():
         log.info(f"Try viewing the stream at http://{host}/streaming")
 
 
 def main():
     global disable_overwrite, run_as, rebuild_all
+
     args = parse_arguments()
     if args.version:
         print(f"{__version__}")
@@ -842,7 +552,8 @@ def main():
             sys.exit(1)
 
     log.info(f"Starting streaming_setup {__version__}")
-    log.debug(f"Using arguments: {vars(args)}")
+    arg_display = "\n\t".join([f"{k}: {v}" for k, v in vars(args).items()])
+    log.debug(f"Using arguments: {arg_display}")
     index_file = Path(args.index_file)
     on_reboot_file = Path(args.on_reboot_file)
     systemd_file = Path(args.systemd_file)
@@ -854,53 +565,43 @@ def main():
     if args.safe:
         disable_overwrite = True
 
-    if args.compile_ffmpeg or args.compile_only:
-        if args.rebuild_all:
-            rebuild_all = True
-
-        log.info(f"Performing \"{'minimal' if args.minimal else 'full'}\" FFmpeg compile")
-        apt("apt install -y git build-essential")
-        extra_libs = []
-        if not args.minimal:
-            if not args.disable_fdk_aac:
-                extra_libs.append(install_fdk_aac())
-            if not args.disable_avisynth:
-                extra_libs.append(install_avisynth())
-            if not args.disable_zimg:
-                extra_libs.append(install_zimg())
-            if not args.disable_dav1d:
-                extra_libs.append(install_dav1d())
-            if not args.disable_kvazaar:
-                extra_libs.append(install_kvazaar())
-            if not args.disable_libxavs:
-                extra_libs.append(install_libxavs())
-            if not args.disable_libsrt:
-                extra_libs.append(install_srt())
-            cmd("ldconfig", demote=False)
-        compile_ffmpeg(
-            extra_libs=" ".join(extra_libs),
-            minimal_install=args.minimal,
-        )
-    else:
-        install_ffmpeg()
+    install_ffmpeg()
 
     if args.compile_only:
         log.info("Compile complete!")
         return
 
     if args.rtsp and not args.rtsp_url:
-        install_rtsp()
-        install_rtsp_systemd(Path("/etc/systemd/system/rtsp_server.service"))
+        rtsp_systemd = Path("/etc/systemd/system/rtsp_server.service")
+        install_rtsp(rtsp_systemd)
+        install_rtsp_systemd(rtsp_systemd)
     elif not args.rtsp:
         install_nginx()
         update_rc_local_file(on_reboot_file=on_reboot_file)
         install_index_file(index_file=index_file, video_size=args.video_size)
         install_on_reboot_file(on_reboot_file=on_reboot_file, index_file=index_file)
-        show_services()
 
     install_ffmpeg_systemd_file(systemd_file=systemd_file, ffmpeg_command=ffmpeg_cmd)
 
-    log.info("Install complete!")
+    log.info("\nInstall complete!")
+
+    if args.rtsp and not args.rtsp_url:
+        log.info("\nCreated two systemd services:\n\tstream_camera\n\trtsp_server")
+        log.info("\nTo check their status, run:\n\tsystemctl status stream_camera\n\tsystemctl status rtsp_server\n")
+        for host in get_addresses():
+            log.info(f"View the stream at rtsp://{host}:8554/streaming")
+    else:
+        log.info("\nCreated systemd service:\n\tstream_camera")
+        log.info("\nTo check the status, run:\n\tsystemctl status stream_camera\n")
+        if not args.rtsp:
+            show_services()
+
+    if warn_no_camera:
+        log.warning("\nCould not find a camera device, assuming user will connect pi camera.")
+        log.warning(
+            "If the camera later connected does not support h264, "
+            f"you will have to manually modify the systemd file {systemd_file}."
+        )
 
 
 if __name__ == "__main__":
