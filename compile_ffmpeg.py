@@ -253,7 +253,7 @@ def compile_ffmpeg(extra_libs, minimal_install=False, install=False):
 
     if detected_arch != "aarch64":
         all_ffmpeg_config.append(("--enable-libopenjpeg", "libopenjpeg-dev libopenjp2-7-dev"))
-        all_ffmpeg_config.append(("--enable-mmal", ""))
+        # all_ffmpeg_config.append(("--enable-mmal", "")) This just breaks anymore?
     else:
         all_ffmpeg_config.append(("--enable-libopenjpeg", "libopenjp2-7-dev"))
 
@@ -275,21 +275,21 @@ def compile_ffmpeg(extra_libs, minimal_install=False, install=False):
         log.info("FFmpeg exists: updating FFmpeg via git pull")
         cmd("git pull", cwd=ffmpeg_dir)
 
-    with open(ffmpeg_dir / "libavcodec" / "v4l2_m2m_enc.c", "r+") as fd:
-        contents = fd.readlines()
-        insert = -1
-        for i, line in enumerate(contents):
-            if "v4l2_set_ext_ctrl(s, MPEG_CID(GOP_SIZE)" in line:
-                if "REPEAT_SEQ_HEADER" not in contents[i + 1]:
-                    insert = i
-                    break
-        if insert > 0:
-            log.info("Inserting repeat parameter sets into v4l2_m2m_enc.c")
-            contents.insert(
-                insert, '    v4l2_set_ext_ctrl(s, MPEG_CID(REPEAT_SEQ_HEADER), 1,"repeat parameter sets", 1);\n'
-            )
-        fd.seek(0)
-        fd.writelines(contents)
+    # with open(ffmpeg_dir / "libavcodec" / "v4l2_m2m_enc.c", "r+") as fd:
+    #     contents = fd.readlines()
+    #     insert = -1
+    #     for i, line in enumerate(contents):
+    #         if "v4l2_set_ext_ctrl(s, MPEG_CID(GOP_SIZE)" in line:
+    #             if "REPEAT_SEQ_HEADER" not in contents[i + 1]:
+    #                 insert = i
+    #                 break
+    #     if insert > 0:
+    #         log.info("Inserting repeat parameter sets into v4l2_m2m_enc.c")
+    #         contents.insert(
+    #             insert, '    v4l2_set_ext_ctrl(s, MPEG_CID(REPEAT_SEQ_HEADER), 1,"repeat parameter sets", 1);\n'
+    #         )
+    #     fd.seek(0)
+    #     fd.writelines(contents)
 
     log.info("Configuring FFmpeg")
     cmd(
