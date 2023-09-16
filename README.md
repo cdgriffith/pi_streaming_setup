@@ -1,7 +1,7 @@
 # Raspberry Pi Camera / Webcam streaming helper scripts
 
 This script is designed to help automate turing a raspberry pi with a
-compatible video4linux2 camera into a MPEG-DASH / HLS streaming server.
+compatible video4linux2 camera into a MPEG-DASH / HLS / RTSP streaming server.
 
 The steps it will attempt to take:
 
@@ -10,8 +10,6 @@ The steps it will attempt to take:
 * (DASH/HLS) Update rc.local to run required setup script on reboot
 * (DASH/HLS) Create index.html file to view video stream at
 * Create systemd service and enable it
-
-Note: THERE IS NO NEED TO COMPILE FFMPEG YOURSELF IN MOST CASES. ONLY DO IT IF YOU KNOW YOU NEED AN UNUSUAL ENCODER.
 
 This script requires Python 3.6+
 
@@ -50,33 +48,12 @@ If you are connecting to an external RTSP server, pass in the `rtsp-url` argumen
 sudo python3 streaming_setup.py --rtsp --rtsp-url rtsp://192.168.1.123:8554/raspberrypi
 ```
 
-## Compile FFmpeg
-If you want to compile FFmpeg you will need to grab the `compile_ffmpeg.py` file.
-
-
-```
-curl -O https://raw.githubusercontent.com/cdgriffith/pi_streaming_setup/master/compile_ffmpeg.py
-```
-
-I suggest setting the user to `pi` if making in your home directory.
-
-```
-sudo python3 streaming_setup.py --run-as pi
-```
-
-If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
-
-If you are compilng FFmpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
-You will not be able to share the built binaries under any license.
-
-
 ## Streaming Setup Script Options
 
 ```
 sudo python streaming_setup.py --help
 usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL] [-f INPUT_FORMAT] [-b BITRATE] [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS]
-                       [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] [--systemd-file SYSTEMD_FILE] [--compile-ffmpeg] [--compile-only] [--camera-info] [--minimal]
-                       [--safe]
+                       [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] [--systemd-file SYSTEMD_FILE] [--camera-info] [--minimal] [--safe]
 
 streaming_setup version 1.7
 
@@ -101,17 +78,38 @@ optional arguments:
   --index-file INDEX_FILE
   --on-reboot-file ON_REBOOT_FILE
   --systemd-file SYSTEMD_FILE
-  --compile-ffmpeg
-  --compile-only
   --camera-info         Show all detected cameras [/dev/video(0-9)] and exit
-  --minimal             Minimal FFmpeg compile including h264, x264, alsa sound and fonts
   --safe                disable overwrite of existing or old scripts
 ```
 
+## Compile FFmpeg
+If you want to compile FFmpeg you will need to grab the `compile_ffmpeg.py` file.
+
+> This will take hours on most Raspberry Pi devices!
+
+Note: THERE IS NO NEED TO COMPILE FFMPEG YOURSELF IN MOST CASES. ONLY DO IT IF YOU KNOW YOU NEED AN UNUSUAL ENCODER.
+
+```
+curl -O https://raw.githubusercontent.com/cdgriffith/pi_streaming_setup/master/compile_ffmpeg.py
+```
+
+I suggest setting the user to `pi` if making in your home directory.
+
+```
+sudo python3 compile_ffmpeg.py --run-as pi
+```
+
+If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
+
+Adding `--install` it will install it to `/usr/local/bin/ffmpeg`. You can always do this later yourself by
+going into the `FFmpeg` folder and typing `make install`
+
+If you are compiling FFmpeg, be aware, this will build a NON-REDISTRIBUTABLE FFmpeg.
+You will not be able to share the built binaries under any license.
+
 ## License
 
-MIT License - Copyright (c) 2023 Chris Griffith
-
+MIT License - Copyright (c) 2020-2023 Chris Griffith
 
 ## Debuging
 
@@ -119,8 +117,7 @@ MIT License - Copyright (c) 2023 Chris Griffith
 
 Go into raspi-config and up the video memory (memory split) to 256 and reboot. (thanks to #15 [rezrov](https://github.com/cdgriffith/pi_streaming_setup/issues/15))
 
-
-## Changes
+## Major Changes
 
 ### 1.7
 
