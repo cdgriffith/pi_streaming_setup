@@ -422,7 +422,7 @@ def install_zimg():
         log.info("libzimg already built")
         return "--enable-libzimg"
 
-    apt("apt install libcpuinfo-dev")
+    apt("apt install -y libcpuinfo-dev")
 
     log.info("Building libzimg")
     lib_dir = ensure_library_dir()
