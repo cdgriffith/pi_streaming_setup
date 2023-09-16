@@ -11,13 +11,35 @@ The steps it will attempt to take:
 * Update rc.local to run required setup script on reboot
 * Create index.html file to view video stream at
 * Create systemd service and enable it
+
+
+The MIT License
+
+Copyright (c) 2020-2023 Chris Griffith
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 """
 
 import logging
 import os
 import sys
 import shutil
-import pwd
 import datetime
 import json
 from subprocess import run, CalledProcessError, PIPE, STDOUT, Popen
@@ -25,7 +47,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.7"
+__version__ = "1.7.1"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")
@@ -84,15 +106,8 @@ def parse_arguments():
     parser.add_argument("--index-file", default="/var/lib/streaming/index.html")
     parser.add_argument("--on-reboot-file", default="/var/lib/streaming/setup_streaming.sh")
     parser.add_argument("--systemd-file", default="/etc/systemd/system/stream_camera.service")
-    parser.add_argument("--compile-ffmpeg", action="store_true")
-    parser.add_argument("--compile-only", action="store_true")
     parser.add_argument(
         "--camera-info", action="store_true", help="Show all detected cameras [/dev/video(0-9)] and exit"
-    )
-    parser.add_argument(
-        "--minimal",
-        action="store_true",
-        help="Minimal FFmpeg compile including h264, x264, alsa sound and fonts",
     )
 
     parser.add_argument("--safe", action="store_true", help="disable overwrite of existing or old scripts")
@@ -524,10 +539,6 @@ def main():
         disable_overwrite = True
 
     install_ffmpeg()
-
-    if args.compile_only:
-        log.info("Compile complete!")
-        return
 
     if args.rtsp and not args.rtsp_url:
         rtsp_systemd = Path("/etc/systemd/system/rtsp_server.service")
