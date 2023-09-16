@@ -45,7 +45,6 @@ log.addHandler(sh)
 
 here = Path(__file__).parent
 disable_overwrite = False
-run_as = "root"
 rebuild_all = False
 warn_no_camera = False
 detected_arch = None
@@ -80,7 +79,7 @@ def parse_arguments():
         "--ffmpeg-params",
         default="",
         help="specify additional FFmpeg params, MUST be doubled quoted! helpful "
-        "if not copying codec e.g.: '\"-b:v 4M -maxrate 4M -buffsize 8M\"' ",
+        "if not copying codec e.g.: '\"-b:v 4M -maxrate 4M -g 30 -num_capture_buffers 128\"'",
     )
     parser.add_argument("--index-file", default="/var/lib/streaming/index.html")
     parser.add_argument("--on-reboot-file", default="/var/lib/streaming/setup_streaming.sh")
@@ -95,40 +94,18 @@ def parse_arguments():
         action="store_true",
         help="Minimal FFmpeg compile including h264, x264, alsa sound and fonts",
     )
-    parser.add_argument(
-        "--run-as", default="root", help="compile programs as provided user (suggested 'pi', defaults to 'root')"
-    )
 
     parser.add_argument("--safe", action="store_true", help="disable overwrite of existing or old scripts")
     return parser.parse_args()
 
 
-def cmd(command, cwd=here, env=None, demote=True, **kwargs):
+def cmd(command, cwd=here, env=None, **kwargs):
     environ = os.environ.copy()
     if env:
         environ.update(env)
 
-    preexec_fn = None
-    if demote:
-        pw_record = pwd.getpwnam(run_as)
-        environ["HOME"] = pw_record.pw_dir
-        environ["LOGNAME"] = pw_record.pw_name
-        environ["PWD"] = cwd
-        environ["USER"] = pw_record.pw_name
-
-        def preexec_fn_demote_wrapper(uid, gid):
-            def demote_to_user():
-                os.setgid(uid)
-                os.setuid(gid)
-
-            return demote_to_user
-
-        preexec_fn = preexec_fn_demote_wrapper(pw_record.pw_uid, pw_record.pw_gid)
-
-    log.debug(f'Executing from "{cwd}" as user "{"root" if not demote else run_as }" command: {command} ')
-    process = Popen(
-        command, shell=True, cwd=cwd, stdout=PIPE, stderr=STDOUT, env=environ, preexec_fn=preexec_fn, **kwargs
-    )
+    log.debug(f'Executing from "{cwd}" command: {command} ')
+    process = Popen(command, shell=True, cwd=cwd, stdout=PIPE, stderr=STDOUT, env=environ, **kwargs)
     while True:
         output = process.stdout.readline().decode("utf-8").strip()
         if output == "" and process.poll() is not None:
@@ -141,10 +118,10 @@ def cmd(command, cwd=here, env=None, demote=True, **kwargs):
 
 def apt(command, cwd=here):
     try:
-        return cmd(command, cwd, demote=False)
+        return cmd(command, cwd)
     except CalledProcessError:
-        cmd("apt update --fix-missing", demote=False)
-        return cmd(command, cwd, demote=False)
+        cmd("apt update --fix-missing")
+        return cmd(command, cwd)
 
 
 def lscpu_output():
@@ -242,18 +219,6 @@ def install_ffmpeg():
     apt("apt install -y ffmpeg")
 
 
-def ensure_library_dir():
-    lib_path = Path(here, "ffmpeg-libraries")
-    return user_dir(lib_path)
-
-
-def user_dir(new_path):
-    new_path.mkdir(exist_ok=True)
-    pw_record = pwd.getpwnam(run_as)
-    os.chown(new_path, pw_record.pw_uid, pw_record.pw_gid)
-    return new_path
-
-
 def update_rc_local_file(on_reboot_file):
     rc_local_update = [
         "# Streaming Shared Memory Setup",
@@ -336,7 +301,7 @@ fi
         log.warning(f"On reboot file exists at {on_reboot_file}, overwriting")
     on_reboot_file.write_text(on_reboot_contents)
     on_reboot_file.chmod(0o755)
-    cmd(f"/bin/bash {on_reboot_file}", demote=False)
+    cmd(f"/bin/bash {on_reboot_file}")
 
 
 def prepare_ffmpeg_command(
@@ -350,14 +315,16 @@ def prepare_ffmpeg_command(
         ffmpeg_params = ffmpeg_params.strip("\"'")
 
     if codec != "copy":
-        if "-b" not in ffmpeg_params and bitrate == "dynamic":
-            x, y = video_size.split("x")
-            bitrate = (int(x) * int(y) * 2) // 1024
-            ffmpeg_params += f" -b:v {bitrate}k"
-        else:
-            if not bitrate.lower().endswith(("m", "k", "g")):
+        if "-b" not in ffmpeg_params:
+            if bitrate == "dynamic":
+                x, y = video_size.split("x")
+                bitrate = (int(x) * int(y) * 2) // 1024
+                ffmpeg_params += f" -b:v {bitrate}k"
+            elif not bitrate.lower().endswith(("m", "k", "g")):
                 bitrate += "k"
-            ffmpeg_params += f" -b:v {bitrate}"
+                ffmpeg_params += f" -b:v {bitrate}"
+            else:
+                ffmpeg_params += f" -b:v {bitrate}"
         if "-pix_fmt" not in ffmpeg_params:
             ffmpeg_params += " -pix_fmt yuv420p "
 
@@ -402,9 +369,9 @@ WantedBy=multi-user.target
     systemd_file.write_text(systemd_contents)
     systemd_file.chmod(0o755)
     log.info(f"Systemd file created at {systemd_file}.")
-    cmd("systemctl daemon-reload", demote=False)
-    cmd(f"systemctl start {systemd_file.stem}", demote=False)
-    cmd(f"systemctl enable {systemd_file.stem}", demote=False)
+    cmd("systemctl daemon-reload")
+    cmd(f"systemctl start {systemd_file.stem}")
+    cmd(f"systemctl enable {systemd_file.stem}")
 
 
 def install_rtsp_systemd(rtsp_systemd_file):
@@ -430,9 +397,9 @@ WantedBy=multi-user.target
     rtsp_systemd_file.write_text(contents)
     rtsp_systemd_file.chmod(0o755)
     log.info(f"rtsp server systemd file created at {rtsp_systemd_file}.")
-    cmd("systemctl daemon-reload", demote=False)
-    cmd(f"systemctl start {rtsp_systemd_file.stem}", demote=False)
-    cmd(f"systemctl enable {rtsp_systemd_file.stem}", demote=False)
+    cmd("systemctl daemon-reload")
+    cmd(f"systemctl start {rtsp_systemd_file.stem}")
+    cmd(f"systemctl enable {rtsp_systemd_file.stem}")
 
 
 def install_rtsp(rtsp_systemd_file):
@@ -458,7 +425,7 @@ def install_rtsp(rtsp_systemd_file):
         else:
             log.info(f"Updating rtsp server from {existing_version} to {rtsp_releases[0]['tag_name']}")
             try:
-                cmd(f"systemctl stop {rtsp_systemd_file.stem}", demote=False)
+                cmd(f"systemctl stop {rtsp_systemd_file.stem}")
             except Exception:
                 pass
 
@@ -508,7 +475,7 @@ def show_services():
 
 
 def main():
-    global disable_overwrite, run_as, rebuild_all
+    global disable_overwrite, rebuild_all
 
     args = parse_arguments()
     if args.version:
@@ -541,14 +508,6 @@ def main():
     if args.ffmpeg_command:
         print(ffmpeg_cmd)
         sys.exit()
-
-    if args.run_as != "root":
-        run_as = args.run_as
-        try:
-            pwd.getpwnam(run_as)
-        except KeyError:
-            log.critical(f"Cannot run as {run_as} as that user does not exist!")
-            sys.exit(1)
 
     log.info(f"Starting streaming_setup {__version__}")
     arg_display = "\n\t".join([f"{k}: {v}" for k, v in vars(args).items()])

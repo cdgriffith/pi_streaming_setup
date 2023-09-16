@@ -73,10 +73,10 @@ You will not be able to share the built binaries under any license.
 ## Streaming Setup Script Options
 
 ```
-usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL]
-                       [-f INPUT_FORMAT] [-b BITRATE] [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS]
-                       [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] [--systemd-file SYSTEMD_FILE]
-                       [--compile-ffmpeg] [--compile-only] [--camera-info] [--minimal] [--run-as RUN_AS] [--safe]
+sudo python streaming_setup.py --help
+usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL] [-f INPUT_FORMAT] [-b BITRATE] [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS]
+                       [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] [--systemd-file SYSTEMD_FILE] [--compile-ffmpeg] [--compile-only] [--camera-info] [--minimal]
+                       [--safe]
 
 streaming_setup version 1.7
 
@@ -97,8 +97,7 @@ optional arguments:
   -c CODEC, --codec CODEC
                         Conversion codec (using 'h264_v4l2m2m')
   --ffmpeg-params FFMPEG_PARAMS
-                        specify additional FFmpeg params, MUST be doubled quoted! helpful if not copying codec
-                        e.g.: '"-b:v 4M -maxrate 4M -buffsize 8M"'
+                        specify additional FFmpeg params, MUST be doubled quoted! helpful if not copying codec e.g.: '"-b:v 4M -maxrate 4M -g 30 -num_capture_buffers 128"'
   --index-file INDEX_FILE
   --on-reboot-file ON_REBOOT_FILE
   --systemd-file SYSTEMD_FILE
@@ -106,7 +105,6 @@ optional arguments:
   --compile-only
   --camera-info         Show all detected cameras [/dev/video(0-9)] and exit
   --minimal             Minimal FFmpeg compile including h264, x264, alsa sound and fonts
-  --run-as RUN_AS       compile programs as provided user (suggested 'pi', defaults to 'root')
   --safe                disable overwrite of existing or old scripts
 ```
 
