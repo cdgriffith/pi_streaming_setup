@@ -1,16 +1,35 @@
+# .pre-commit-config.yaml
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v2.5.0
+    rev: v4.4.0
     hooks:
-    - id: mixed-line-ending
-    - id: trailing-whitespace
-    - id: requirements-txt-fixer
+
+    # Identify invalid files
+    - id: check-ast
     - id: check-yaml
     - id: check-json
-    - id: fix-encoding-pragma
-    - id: check-byte-order-marker
+    - id: check-toml
+
+    # git checks
+    - id: check-merge-conflict
+    - id: check-added-large-files
+    - id: detect-private-key
+    - id: check-case-conflict
+
+    # Python checks
+    - id: check-docstring-first
     - id: debug-statements
+    - id: requirements-txt-fixer
+    - id: fix-encoding-pragma
+    - id: fix-byte-order-marker
+
+    # General quality checks
+    - id: mixed-line-ending
+    - id: trailing-whitespace
+      args: [--markdown-linebreak-ext=md]
+    - id: check-executables-have-shebangs
+    - id: end-of-file-fixer
   - repo: https://github.com/psf/black
-    rev: stable
+    rev: 23.9.1
     hooks:
       - id: black

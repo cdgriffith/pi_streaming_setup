@@ -5,24 +5,30 @@ compatible video4linux2 camera into a MPEG-DASH / HLS streaming server.
 
 The steps it will attempt to take:
 
-* Install FFmpeg OR (optional) Compile and Install FFmpeg ( with h264 hardware acceleration and nonfree libraries)
+* Install FFmpeg
 * Install nginx for DASH / HLS OR install RTSP server if desired
 * (DASH/HLS) Update rc.local to run required setup script on reboot
 * (DASH/HLS) Create index.html file to view video stream at
 * Create systemd service and enable it
 
-If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
-
-If you are compilng FFmpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
-You will not be able to share the built binaries under any license.
+Note: THERE IS NO NEED TO COMPILE FFMPEG YOURSELF IN MOST CASES. ONLY DO IT IF YOU KNOW YOU NEED AN UNUSUAL ENCODER.
 
 This script requires Python 3.6+
 
-## MPEG DASH / HLS 
+## Grab the script
 
-DASH is a great way to use your device as standalone streaming server with a easy to view webpage hosted on the Pi. 
+```
+curl -O https://raw.githubusercontent.com/cdgriffith/pi_streaming_setup/master/streaming_setup.py
+```
+
+You could also clone the repo, or use wget, or whatever you desire. You just need the `streaming_setup.py` file.
+
+
+## MPEG DASH / HLS
+
+DASH is a great way to use your device as standalone streaming server with a easy to view webpage hosted on the Pi.
 The disadvantage is the delay due to buffering and the way DASH / HLS work with manifest files. You will have a 5~20
-second lag from the camera to when you view it. 
+second lag from the camera to when you view it.
 
 To use the pre-built FFmpeg and MPEG DASH, just need to run the script as root / sudo then you're good to go:
 
@@ -30,11 +36,11 @@ To use the pre-built FFmpeg and MPEG DASH, just need to run the script as root /
 sudo python3 streaming_setup.py
 ```
 
-## RTSP 
+## RTSP
 
 If you want near instant real time streaming, it's best to use the aptly named Real Time Streaming Protocol, RTSP.
 
-``` 
+```
 sudo python3 streaming_setup.py --rtsp
 ```
 
@@ -45,26 +51,34 @@ sudo python3 streaming_setup.py --rtsp --rtsp-url rtsp://192.168.1.123:8554/rasp
 ```
 
 ## Compile FFmpeg
-If you want to compile FFmpeg make sure to pass the `--compile-ffmpeg` flag
-and I suggest setting the user to `pi` if making in your home directory. 
+If you want to compile FFmpeg you will need to grab the `compile_ffmpeg.py` file.
+
 
 ```
-sudo python3 streaming_setup.py --compile-ffmpeg --run-as pi
+curl -O https://raw.githubusercontent.com/cdgriffith/pi_streaming_setup/master/compile_ffmpeg.py
 ```
 
-
-
-
-## Script Options 
+I suggest setting the user to `pi` if making in your home directory.
 
 ```
-usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL] [-f INPUT_FORMAT] [-b BITRATE] 
-                       [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS] [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] 
-                       [--systemd-file SYSTEMD_FILE] [--compile-ffmpeg] [--compile-only] [--camera-info]
-                       [--minimal] [--run-as RUN_AS] [--disable-fdk-aac] [--disable_avisynth] [--disable-dav1d] 
-                       [--disable-zimg] [--disable-kvazaar] [--disable-libxavs] [--disable-libsrt] [--rebuild-all] [--safe]
+sudo python3 streaming_setup.py --run-as pi
+```
 
-streaming_setup version 1.6
+If you will be compiling while running over SSH, please use in a background terminal like "tmux" or "screen".
+
+If you are compilng FFmpeg, be aware, this will build a NON REDISTRIBUTABLE FFmpeg.
+You will not be able to share the built binaries under any license.
+
+
+## Streaming Setup Script Options
+
+```
+sudo python streaming_setup.py --help
+usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL] [-f INPUT_FORMAT] [-b BITRATE] [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS]
+                       [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] [--systemd-file SYSTEMD_FILE] [--compile-ffmpeg] [--compile-only] [--camera-info] [--minimal]
+                       [--safe]
+
+streaming_setup version 1.7
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -73,17 +87,17 @@ optional arguments:
   -d DEVICE, -i DEVICE, --device DEVICE
                         Camera. Selected: /dev/video0
   -s VIDEO_SIZE, --video-size VIDEO_SIZE
-                        The video resolution from the camera (using 1920x1080)
+                        The video resolution from the camera (using 1280x720)
   -r, --rtsp            Use RTSP instead of DASH / HLS
   --rtsp-url RTSP_URL   Provide a remote RTSP url to connect to and don't set up a local server
   -f INPUT_FORMAT, --input-format INPUT_FORMAT
-                        The format the camera supports (using h264)
+                        The format the camera supports (using mjpeg)
   -b BITRATE, --bitrate BITRATE
-                        Streaming bitrate, is auto calculated by default
+                        Streaming bitrate, is auto calculated by default. (Will be ignored if the codec is 'copy')
   -c CODEC, --codec CODEC
-                        Conversion codec (using 'copy')
+                        Conversion codec (using 'h264_v4l2m2m')
   --ffmpeg-params FFMPEG_PARAMS
-                        specify additional FFmpeg params, helpful if not copying codec e.g.: '-b:v 4M -maxrate 4M -buffsize 8M'
+                        specify additional FFmpeg params, MUST be doubled quoted! helpful if not copying codec e.g.: '"-b:v 4M -maxrate 4M -g 30 -num_capture_buffers 128"'
   --index-file INDEX_FILE
   --on-reboot-file ON_REBOOT_FILE
   --systemd-file SYSTEMD_FILE
@@ -91,22 +105,12 @@ optional arguments:
   --compile-only
   --camera-info         Show all detected cameras [/dev/video(0-9)] and exit
   --minimal             Minimal FFmpeg compile including h264, x264, alsa sound and fonts
-  --run-as RUN_AS       compile programs as provided user (suggested 'pi', defaults to 'root')
-  --disable-fdk-aac     Normally installed on full install
-  --disable_avisynth    Normally installed on full install
-  --disable-dav1d       Normally installed on full install
-  --disable-zimg        Normally installed on full install
-  --disable-kvazaar     Normally installed on full install
-  --disable-libxavs     Normally installed on full install
-  --disable-libsrt      Normally installed on full install
-  --rebuild-all         Recompile all libraries
   --safe                disable overwrite of existing or old scripts
-
 ```
 
 ## License
 
-MIT License - Copyright (c) 2020 Chris Griffith
+MIT License - Copyright (c) 2023 Chris Griffith
 
 
 ## Debuging
@@ -115,3 +119,11 @@ MIT License - Copyright (c) 2020 Chris Griffith
 
 Go into raspi-config and up the video memory (memory split) to 256 and reboot. (thanks to #15 [rezrov](https://github.com/cdgriffith/pi_streaming_setup/issues/15))
 
+
+## Changes
+
+### 1.7
+
+* Adding support for 64-bit OSes (aarch64)
+* Changing default codec to h264_v4l2m2m (removing h264_omx)
+* Splitting out compile_ffmpeg.py into its own file
