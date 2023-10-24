@@ -492,6 +492,8 @@ def show_services():
 def main():
     global disable_overwrite, rebuild_all
 
+    install_ffmpeg()
+    
     args = parse_arguments()
     if args.version:
         print(f"{__version__}")
@@ -537,8 +539,6 @@ def main():
 
     if args.safe:
         disable_overwrite = True
-
-    install_ffmpeg()
 
     if args.rtsp and not args.rtsp_url:
         rtsp_systemd = Path("/etc/systemd/system/rtsp_server.service")
