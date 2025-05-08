@@ -416,10 +416,10 @@ WantedBy=multi-user.target
     cmd(f"systemctl start {rtsp_systemd_file.stem}")
     cmd(f"systemctl enable {rtsp_systemd_file.stem}")
 
-
 def install_rtsp(rtsp_systemd_file):
     from urllib.request import urlopen
     import tarfile
+    import platform
 
     sd = Path("/var/lib/streaming/")
     existing_version = None
@@ -447,36 +447,111 @@ def install_rtsp(rtsp_systemd_file):
     log.info(f'Downloading RTSP Server mediamtx {rtsp_releases[0]["tag_name"]}')
 
     rtsp_assets = json.loads(urlopen(rtsp_releases[0]["assets_url"]).read().decode("utf-8"))
+
+    # Detect the current OS
+    system = platform.system().lower()
+    if system == "darwin":
+        os_type = "darwin"
+    else:
+        os_type = "linux"  # Default to Linux for Raspberry Pi and other Linux systems
+
     lscpu = lscpu_output()
-    mappings = {
-        "armv7l": "armv7",
+
+    # Simplified architecture mappings based on the actual available files
+    arch_mappings = {
+        "armv7l": "armv7",  # Map to armv7 if it exists or we'll fall back to armv6
         "armv6l": "armv6",
-        "aarch64": "arm64v8",
+        "aarch64": "arm64",
+        "x86_64": "amd64",  # For Intel/AMD 64-bit processors
     }
-    if lscpu["architecture"] not in mappings:
-        # Old mapping style for safety
-        mappings = {
+
+    # If architecture isn't in our mapping, try the legacy mapping
+    if lscpu["architecture"] not in arch_mappings:
+        legacy_mappings = {
             "armv7l": "arm7",
             "armv6l": "arm6",
             "aarch64": "arm64v8",
+            "x86_64": "amd64",
         }
-        if lscpu["architecture"] not in mappings:
-            raise Exception(f"mediamtx does not support arch {lscpu['architecture']}")
 
-    arch = mappings[lscpu["architecture"]]
+        if lscpu["architecture"] not in legacy_mappings:
+            log.error(f"Architecture {lscpu['architecture']} not found in mappings")
+            available_assets = [asset["name"] for asset in rtsp_assets
+                              if not asset["name"].endswith(".sha256sum")]
+            log.error(f"Available assets: {available_assets}")
+            raise Exception(f"mediamtx does not support architecture {lscpu['architecture']}")
 
+        arch = legacy_mappings[lscpu["architecture"]]
+    else:
+        arch = arch_mappings[lscpu["architecture"]]
+
+    log.info(f"Detected system: {os_type}, architecture: {arch}")
     sd.mkdir(exist_ok=True)
 
+    # Get list of actual available architectures for fallback purposes
+    available_assets = [asset["name"] for asset in rtsp_assets
+                      if not asset["name"].endswith(".sha256sum")]
+
+    # Construct expected filename pattern
+    expected_pattern = f"{os_type}_{arch}"
+    download_success = False
+
+    # First attempt: find exact match
     for asset in rtsp_assets:
-        if arch in asset["name"]:
+        if asset["name"].endswith(".sha256sum"):
+            continue  # Skip checksum files
+
+        asset_name = asset["name"].lower()
+        if expected_pattern in asset_name:
+            log.info(f"Found matching asset: {asset['name']}")
             with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], "wb") as out_file:
                 shutil.copyfileobj(response, out_file)
             with tarfile.open(sd / asset["name"]) as tf:
                 tf.extractall(path=sd)
+            download_success = True
             break
-    else:
-        raise Exception("Could not find download for rtsp server")
 
+    # Second attempt: If armv7 wasn't found, try armv6 for armv7l architecture
+    if not download_success and lscpu["architecture"] == "armv7l":
+        fallback_pattern = f"{os_type}_armv6"
+        log.info(f"Trying fallback from armv7 to armv6 for armv7l architecture")
+
+        for asset in rtsp_assets:
+            if asset["name"].endswith(".sha256sum"):
+                continue
+
+            asset_name = asset["name"].lower()
+            if fallback_pattern in asset_name:
+                log.info(f"Found fallback asset: {asset['name']}")
+                with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], "wb") as out_file:
+                    shutil.copyfileobj(response, out_file)
+                with tarfile.open(sd / asset["name"]) as tf:
+                    tf.extractall(path=sd)
+                download_success = True
+                break
+
+    # Third attempt: Try a more flexible matching approach
+    if not download_success:
+        log.warning(f"Could not find exact pattern {expected_pattern}, trying more flexible matching")
+        for asset in rtsp_assets:
+            if asset["name"].endswith(".sha256sum"):
+                continue
+
+            asset_name = asset["name"].lower()
+            if os_type in asset_name and (arch in asset_name or
+                                         (lscpu["architecture"] == "armv7l" and "armv6" in asset_name)):
+                log.info(f"Found alternative match: {asset['name']}")
+                with urlopen(asset["browser_download_url"]) as response, open(sd / asset["name"], "wb") as out_file:
+                    shutil.copyfileobj(response, out_file)
+                with tarfile.open(sd / asset["name"]) as tf:
+                    tf.extractall(path=sd)
+                download_success = True
+                break
+
+    if not download_success:
+        filtered_assets = [a for a in available_assets if not a.endswith(".sha256sum")]
+        log.error(f"Available assets: {filtered_assets}")
+        raise Exception(f"Could not find download for rtsp server for {os_type}_{arch}")
 
 def get_addresses():
     ips = run("hostname -I", shell=True, stdout=PIPE).stdout.decode("utf-8")
