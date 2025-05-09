@@ -15,7 +15,7 @@ The steps it will attempt to take:
 
 The MIT License
 
-Copyright (c) 2020-2023 Chris Griffith
+Copyright (c) 2020-2025 Chris Griffith
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -47,7 +47,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 __author__ = "Chris Griffith"
-__version__ = "1.7.1"
+__version__ = "1.8"
 
 log = logging.getLogger("streaming_setup")
 command_log = logging.getLogger("streaming_setup.command")

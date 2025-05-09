@@ -55,7 +55,7 @@ sudo python streaming_setup.py --help
 usage: streaming_setup [-h] [-v] [--ffmpeg-command] [-d DEVICE] [-s VIDEO_SIZE] [-r] [--rtsp-url RTSP_URL] [-f INPUT_FORMAT] [-b BITRATE] [-c CODEC] [--ffmpeg-params FFMPEG_PARAMS]
                        [--index-file INDEX_FILE] [--on-reboot-file ON_REBOOT_FILE] [--systemd-file SYSTEMD_FILE] [--camera-info] [--minimal] [--safe]
 
-streaming_setup version 1.7
+streaming_setup version 1.8
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -109,7 +109,7 @@ You will not be able to share the built binaries under any license.
 
 ## License
 
-MIT License - Copyright (c) 2020-2023 Chris Griffith
+MIT License - Copyright (c) 2020-2025 Chris Griffith
 
 ## Debuging
 
@@ -118,6 +118,11 @@ MIT License - Copyright (c) 2020-2023 Chris Griffith
 Go into raspi-config and up the video memory (memory split) to 256 and reboot. (thanks to #15 [rezrov](https://github.com/cdgriffith/pi_streaming_setup/issues/15))
 
 ## Major Changes
+
+### 1.8
+
+* Adding check for existing ffmpeg ahead of time (thanks to Noah Abu-Hajar)
+* Fix download for mediamtx (thanks to Christopher Brown)
 
 ### 1.7
 
